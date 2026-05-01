@@ -1,13 +1,12 @@
 import hashlib
 import json
-import sqlite3
 import time
 from datetime import datetime
 from urllib.parse import quote
 
 import httpx
 
-from app.config import CACHE_DB_PATH
+from app.services import cache
 
 SUGGEST_URL = "https://en.wikipedia.org/w/api.php"
 PAGEVIEWS_BASE = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
@@ -18,39 +17,12 @@ HEADERS = {
 CACHE_TTL = 60 * 60 * 24 * 7  # 7 days
 
 
-def _db() -> sqlite3.Connection:
-    c = sqlite3.connect(CACHE_DB_PATH)
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS wiki_cache (
-            key TEXT PRIMARY KEY,
-            payload TEXT NOT NULL,
-            fetched_at INTEGER NOT NULL
-        )
-        """
-    )
-    return c
-
-
 def _cache_get(key: str) -> dict | None:
-    with _db() as c:
-        row = c.execute(
-            "SELECT payload, fetched_at FROM wiki_cache WHERE key = ?", (key,)
-        ).fetchone()
-    if not row:
-        return None
-    payload, fetched_at = row
-    if time.time() - fetched_at > CACHE_TTL:
-        return None
-    return json.loads(payload)
+    return cache.get("wiki_cache", key, CACHE_TTL)
 
 
 def _cache_set(key: str, payload: dict) -> None:
-    with _db() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO wiki_cache (key, payload, fetched_at) VALUES (?, ?, ?)",
-            (key, json.dumps(payload), int(time.time())),
-        )
+    cache.set("wiki_cache", key, payload, CACHE_TTL)
 
 
 def suggest(q: str, limit: int = 8) -> list[dict]:

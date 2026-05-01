@@ -1,13 +1,12 @@
 import hashlib
 import json
 import random
-import sqlite3
 import time
 from datetime import datetime, timezone
 
 import httpx
 
-from app.config import CACHE_DB_PATH
+from app.services import cache
 
 EXPLORE_URL = "https://trends.google.com/trends/api/explore"
 SINGLE_URL = "https://trends.google.com/trends/api/widgetdata/multiline"
@@ -58,20 +57,6 @@ def _get_with_retry(
     raise RuntimeError("unreachable")
 
 
-def _db() -> sqlite3.Connection:
-    c = sqlite3.connect(CACHE_DB_PATH)
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS trends_cache (
-            key TEXT PRIMARY KEY,
-            payload TEXT NOT NULL,
-            fetched_at INTEGER NOT NULL
-        )
-        """
-    )
-    return c
-
-
 def _cache_key(keywords: list[str], years: list[int], geo: str) -> str:
     raw = json.dumps(
         {"k": sorted(k.strip() for k in keywords), "y": sorted(years), "g": geo},
@@ -81,24 +66,11 @@ def _cache_key(keywords: list[str], years: list[int], geo: str) -> str:
 
 
 def _cache_get(key: str) -> dict | None:
-    with _db() as c:
-        row = c.execute(
-            "SELECT payload, fetched_at FROM trends_cache WHERE key = ?", (key,)
-        ).fetchone()
-    if not row:
-        return None
-    payload, fetched_at = row
-    if time.time() - fetched_at > CACHE_TTL:
-        return None
-    return json.loads(payload)
+    return cache.get("trends_cache", key, CACHE_TTL)
 
 
 def _cache_set(key: str, payload: dict) -> None:
-    with _db() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO trends_cache (key, payload, fetched_at) VALUES (?, ?, ?)",
-            (key, json.dumps(payload), int(time.time())),
-        )
+    cache.set("trends_cache", key, payload, CACHE_TTL)
 
 
 def _strip_jsonp(text: str) -> dict:
