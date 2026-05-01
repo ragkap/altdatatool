@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Smartkarma Alt-Data Analysis Tool{% endblock %}</title>
+  <meta name="description" content="A Smartkarma alt-data analysis tool: overlay Google search interest and Wikipedia pageviews on share price to surface signals across global equities.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{% block og_title %}Smartkarma Alt-Data Analysis Tool{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}A Smartkarma alt-data analysis tool: overlay Google search interest and Wikipedia pageviews on share price to surface signals across global equities.{% endblock %}">
+  <meta property="og:image" content="https://sk-assets.s3.amazonaws.com/online-branding-manual/01-logotypes/curation-compass-box-full-colour-1000px.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Smartkarma Alt-Data Analysis Tool">
+  <meta name="twitter:description" content="A Smartkarma alt-data analysis tool: overlay Google search interest and Wikipedia pageviews on share price.">
+  <meta name="twitter:image" content="https://sk-assets.s3.amazonaws.com/online-branding-manual/01-logotypes/curation-compass-box-full-colour-1000px.png">
+  <link rel="icon" type="image/png" href="https://sk-assets.s3.amazonaws.com/online-branding-manual/01-logotypes/curation-compass-box-full-colour-1000px.png">
+  <link rel="apple-touch-icon" href="https://sk-assets.s3.amazonaws.com/online-branding-manual/01-logotypes/curation-compass-box-full-colour-1000px.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span>Alt-Data Analysis Tool</div>
+    <div class="nav-search" id="nav-ticker"></div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-label">Studies</div>
+      <nav class="sidebar-nav">
+        {% for s in studies %}
+          <a href="/study/{{ s.id }}" class="sidebar-item {% if request.url.path == '/study/' + s.id %}active{% endif %}">
+            <span class="sidebar-num">{{ s.num }}</span>
+            <span class="sidebar-text">
+              <span class="sidebar-title">{{ s.title }}</span>
+              {% if s.subtitle %}<span class="sidebar-sub">{{ s.subtitle }}</span>{% endif %}
+            </span>
+          </a>
+        {% endfor %}
+      </nav>
+    </aside>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+  <script>
+    AltData.installNavTicker(document.getElementById('nav-ticker'));
+    AltData.hydrateFromUrl();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
