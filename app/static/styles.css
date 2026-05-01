@@ -519,15 +519,7 @@ button.ghost {
     flex-wrap: nowrap;
   }
   .hamburger { display: inline-flex; flex-shrink: 0; }
-  .topbar .brand {
-    font-size: 14px;
-    min-width: 0;
-    flex: 0 0 auto;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .topbar .brand .dot { margin-right: 6px; }
+  .topbar .brand { display: none; }
   .topbar .nav-search {
     flex: 1 1 auto;
     min-width: 0;
@@ -563,8 +555,6 @@ button.ghost {
     flex: 1 1 100%;
   }
   .toolbar .field button#run-btn { width: 100%; justify-content: center; }
-  .range-group { width: 100%; }
-  .range-group button { flex: 1 1 0; padding: 9px 0; }
 
   /* Wiki page input + chips wrap properly */
   .wiki-input .row { flex-direction: column; align-items: stretch !important; }
@@ -586,7 +576,6 @@ button.ghost {
 
 /* Very narrow phones — extra tightening */
 @media (max-width: 420px) {
-  .topbar .brand { display: none; } /* search alone is enough */
   .chart-wrap { height: 320px; }
   .ticker-chip-action { display: none; } /* "change" hint hidden, X still works */
 }
