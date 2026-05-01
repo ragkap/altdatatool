@@ -20,8 +20,18 @@ SMARTKARMA_API_EMAIL = os.environ.get("SMARTKARMA_API_EMAIL", "")
 UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
-# On Vercel/Lambda only /tmp is writable. Default cache path falls back to /tmp there.
-_default_cache = "/tmp/cache.sqlite" if os.environ.get("VERCEL") else "./data/cache.sqlite"
+# On serverless (Vercel/Lambda) only /tmp is writable. Detect via env vars Vercel/Lambda set.
+_is_serverless = bool(
+    os.environ.get("VERCEL")
+    or os.environ.get("VERCEL_ENV")
+    or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+)
+_default_cache = "/tmp/cache.sqlite" if _is_serverless else "./data/cache.sqlite"
 _cache_raw = os.environ.get("CACHE_DB_PATH", _default_cache)
 CACHE_DB_PATH = Path(_cache_raw) if _cache_raw.startswith("/") else (ROOT / _cache_raw)
-CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+try:
+    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Read-only filesystem (e.g. Lambda layer); fall back to /tmp.
+    CACHE_DB_PATH = Path("/tmp/cache.sqlite")
+    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
