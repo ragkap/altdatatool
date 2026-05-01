@@ -24,6 +24,9 @@
 </head>
 <body>
   <header class="topbar">
+    <button class="hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
     <div class="brand"><span class="dot"></span>Alt-Data Analysis Tool</div>
     <div class="nav-search" id="nav-ticker"></div>
   </header>
@@ -41,6 +44,7 @@
           </a>
         {% endfor %}
       </nav>
+      <div class="sidebar-coming-soon">More studies on the way!</div>
     </aside>
     <main>
       {% block content %}{% endblock %}
@@ -50,6 +54,18 @@
   <script>
     AltData.installNavTicker(document.getElementById('nav-ticker'));
     AltData.hydrateFromUrl();
+    (function() {
+      const hb = document.getElementById('hamburger');
+      const sb = document.querySelector('.sidebar');
+      if (!hb || !sb) return;
+      hb.addEventListener('click', () => {
+        const open = sb.classList.toggle('open');
+        hb.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      sb.querySelectorAll('.sidebar-item').forEach(a => {
+        a.addEventListener('click', () => sb.classList.remove('open'));
+      });
+    })();
   </script>
   {% block scripts %}{% endblock %}
 </body>
