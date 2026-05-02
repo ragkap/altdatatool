@@ -45,6 +45,17 @@
         {% endfor %}
       </nav>
       <div class="sidebar-coming-soon">More studies on the way!</div>
+
+      <div class="sidebar-label" style="margin-top:16px">Discover</div>
+      <nav class="sidebar-nav">
+        <a href="/artifacts" class="sidebar-item {% if request.url.path == '/artifacts' %}active{% endif %}">
+          <span class="sidebar-num">∞</span>
+          <span class="sidebar-text">
+            <span class="sidebar-title">Artifacts</span>
+            <span class="sidebar-sub">Recently run studies</span>
+          </span>
+        </a>
+      </nav>
     </aside>
     <main>
       {% block content %}{% endblock %}

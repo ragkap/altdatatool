@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.services import consensus, prices, smartscore, tickers, trends, wiki
+from app.services import artifacts, consensus, prices, smartscore, tickers, trends, wiki
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Alt-Data Analysis Tool")
@@ -22,6 +22,55 @@ STUDIES = [
     {"id": "4", "num": "04", "title": "Smartkarma SmartScore", "subtitle": ""},
     {"id": "5", "num": "05", "title": "Sellside Consensus", "subtitle": ""},
 ]
+STUDY_LABELS = {s["id"]: s["title"] for s in STUDIES}
+
+
+def _record_artifact(
+    study_id: str,
+    bloomberg_ticker: str,
+    yahoo_ticker: str,
+    params: dict,
+    has_data: bool,
+) -> None:
+    """Best-effort artifact log. Never raises — failure shouldn't block the chart."""
+    if not has_data:
+        return
+    try:
+        # Look up the company name + slug for nicer artifact rows
+        company = None
+        for r in tickers._all_entities():
+            if (r.get("bloomberg_ticker") or "") == bloomberg_ticker:
+                company = r
+                break
+        slug = (company or {}).get("slug") or ""
+        name = (company or {}).get("name") or bloomberg_ticker
+
+        # Build a shareable URL with params encoded the same way the JS does
+        from urllib.parse import urlencode
+        query = {"ticker": slug} if slug else {}
+        for k, v in params.items():
+            if v is None or v == "":
+                continue
+            if isinstance(v, list):
+                if not v:
+                    continue
+                query[k] = ",".join(str(x) for x in v)
+            else:
+                query[k] = str(v)
+        study_url = f"/study/{study_id}?{urlencode(query)}" if query else f"/study/{study_id}"
+
+        artifacts.record({
+            "study_id": study_id,
+            "study_label": STUDY_LABELS.get(study_id, f"Study {study_id}"),
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "company_name": name,
+            "slug": slug,
+            "study_url": study_url,
+            "params": params,
+        })
+    except Exception:
+        pass
 
 
 @app.middleware("http")
@@ -44,6 +93,21 @@ def study_page(request: Request, study_id: str):
         f"study{study_id}.html",
         {"request": request, "study_id": study_id, "studies": STUDIES},
     )
+
+
+@app.get("/artifacts", response_class=HTMLResponse)
+def artifacts_page(request: Request):
+    return templates.TemplateResponse(
+        "artifacts.html",
+        {"request": request, "studies": STUDIES},
+    )
+
+
+@app.get("/api/artifacts")
+def api_artifacts(limit: int = 50, offset: int = 0):
+    limit = max(1, min(200, limit))
+    offset = max(0, offset)
+    return {"results": artifacts.list_recent(limit=limit, offset=offset)}
 
 
 @app.get("/api/tickers")
@@ -159,6 +223,14 @@ def api_study2_yoy(
             "message": f"No share price data available for {bloomberg_ticker} over this range.",
         })
 
+    _record_artifact(
+        study_id="2",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"keywords": kw_list, "years": years},
+        has_data=bool(yoy or price_data),
+    )
+
     return JSONResponse(
         {
             "bloomberg_ticker": bloomberg_ticker,
@@ -226,6 +298,14 @@ def api_study1_continuous(
             "message": f"No share price data available for {bloomberg_ticker} over this range.",
         })
 
+    _record_artifact(
+        study_id="1",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"keywords": kw_list, "range": range.upper()},
+        has_data=bool(trends_series or price_data),
+    )
+
     return JSONResponse(
         {
             "bloomberg_ticker": bloomberg_ticker,
@@ -288,6 +368,14 @@ def api_study3(
             "message": f"No share price data available for {bloomberg_ticker} over this range.",
         })
 
+    _record_artifact(
+        study_id="3",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"pages": titles, "range": range.upper()},
+        has_data=bool(aggregated or price_data),
+    )
+
     return JSONResponse(
         {
             "bloomberg_ticker": bloomberg_ticker,
@@ -337,6 +425,14 @@ def api_study4(
             "source": "Share price",
             "message": f"No share price data available for {bloomberg_ticker} over this range.",
         })
+
+    _record_artifact(
+        study_id="4",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"range": range.upper()},
+        has_data=bool(smart or price_data),
+    )
 
     return JSONResponse(
         {
@@ -409,6 +505,14 @@ def api_study5(
             "source": "Share price",
             "message": f"No share price data available for {bloomberg_ticker} over this range.",
         })
+
+    _record_artifact(
+        study_id="5",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"metric": metric, "range": range.upper()},
+        has_data=bool(consensus_payload["series"] or price_data),
+    )
 
     return JSONResponse(
         {

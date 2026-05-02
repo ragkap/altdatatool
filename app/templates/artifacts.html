@@ -1,0 +1,178 @@
+{% extends "_base.html" %}
+{% block title %}Artifacts · Smartkarma Alt-Data Analysis Tool{% endblock %}
+{% block content %}
+<div class="study-header">
+  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Discover</div>
+  <h1>Artifacts</h1>
+  <p class="muted study-desc">A live feed of studies recently run by other users. Click any row to open the same chart.</p>
+</div>
+
+<div class="card" id="artifacts-card">
+  <div class="artifacts-toolbar">
+    <div class="search" style="flex:1 1 auto">
+      <input type="search" id="artifacts-search" placeholder="Filter by ticker, company, study or keyword…" autocomplete="off" />
+    </div>
+    <span id="artifacts-count" class="muted" style="font-size:12px;white-space:nowrap"></span>
+  </div>
+  <div id="artifacts-empty" class="empty" style="display:none">
+    No artifacts yet. Run a study to be the first.
+  </div>
+  <div id="artifacts-no-match" class="empty" style="display:none">
+    No matches.
+  </div>
+  <div id="artifacts-list" class="artifacts-list"></div>
+  <div class="row" style="justify-content:center;margin-top:16px">
+    <button class="icon-btn" id="load-more" style="display:none">Load more</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PAGE_SIZE = 100;
+let offset = 0;
+let allArtifacts = [];
+let query = '';
+
+function relTime(ms) {
+  const diff = Math.max(0, Date.now() - ms);
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+function renderParams(a) {
+  const p = a.params || {};
+  const bits = [];
+  if (p.range) bits.push(p.range);
+  if (p.years) bits.push(`${p.years}y`);
+  if (p.metric) bits.push(p.metric === 'epsgaap' ? 'EPS (GAAP)' : 'Sales');
+  if (Array.isArray(p.keywords) && p.keywords.length) {
+    bits.push(`<span class="art-kw">kw: ${p.keywords.join(' + ')}</span>`);
+  }
+  if (Array.isArray(p.pages) && p.pages.length) {
+    bits.push(`<span class="art-kw">pages: ${p.pages.map(s => s.replace(/_/g,' ')).join(' + ')}</span>`);
+  }
+  return bits.join(' · ');
+}
+
+function rowHtml(a) {
+  return `
+    <a class="artifact-row" href="${a.study_url}">
+      <span class="art-time">${relTime(a.ts_ms)}</span>
+      <span class="art-company">
+        <span class="art-name">${a.company_name || a.bloomberg_ticker}</span>
+        <span class="art-tk">${a.bloomberg_ticker || ''}</span>
+      </span>
+      <span class="art-study">${a.study_label}</span>
+      <span class="art-params">${renderParams(a)}</span>
+    </a>
+  `;
+}
+
+// Build a flat searchable string for an artifact — includes everything a user
+// might type to find it.
+function searchHaystack(a) {
+  const p = a.params || {};
+  const parts = [
+    a.company_name || '',
+    a.bloomberg_ticker || '',
+    a.yahoo_ticker || '',
+    a.slug || '',
+    a.study_label || '',
+    p.range || '',
+    p.years ? `${p.years}y` : '',
+    p.metric === 'epsgaap' ? 'eps gaap' : (p.metric === 'sales' ? 'sales' : ''),
+    Array.isArray(p.keywords) ? p.keywords.join(' ') : '',
+    Array.isArray(p.pages) ? p.pages.map(s => s.replace(/_/g, ' ')).join(' ') : '',
+  ];
+  return parts.join(' ').toLowerCase();
+}
+
+function applyFilter() {
+  const q = query.trim().toLowerCase();
+  const list = document.getElementById('artifacts-list');
+  const noMatch = document.getElementById('artifacts-no-match');
+  const empty = document.getElementById('artifacts-empty');
+  const count = document.getElementById('artifacts-count');
+
+  if (!allArtifacts.length) {
+    empty.style.display = '';
+    noMatch.style.display = 'none';
+    list.innerHTML = '';
+    count.textContent = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const filtered = q
+    ? allArtifacts.filter(a => searchHaystack(a).includes(q))
+    : allArtifacts;
+
+  if (!filtered.length) {
+    list.innerHTML = '';
+    noMatch.style.display = '';
+    count.textContent = `0 of ${allArtifacts.length}`;
+    return;
+  }
+  noMatch.style.display = 'none';
+  list.innerHTML = filtered.map(rowHtml).join('');
+  count.textContent = q
+    ? `${filtered.length} of ${allArtifacts.length}`
+    : `${allArtifacts.length} total`;
+}
+
+async function loadPage() {
+  const btn = document.getElementById('load-more');
+  if (btn) btn.disabled = true;
+  try {
+    const { results } = await AltData.jsonGet(`/api/artifacts?limit=${PAGE_SIZE}&offset=${offset}`);
+    allArtifacts = allArtifacts.concat(results || []);
+    offset += (results || []).length;
+    applyFilter();
+    if ((results || []).length < PAGE_SIZE) {
+      if (btn) btn.style.display = 'none';
+    } else {
+      if (btn) { btn.style.display = ''; btn.disabled = false; }
+    }
+  } catch (e) {
+    console.error(e);
+    document.getElementById('artifacts-list').insertAdjacentHTML('beforeend',
+      `<div class="error" style="margin-top:12px">Couldn't load artifacts: ${e.message}</div>`);
+  }
+}
+
+function syncUrlQuery(q) {
+  const url = new URL(window.location.href);
+  if (q && q.trim()) url.searchParams.set('q', q.trim());
+  else url.searchParams.delete('q');
+  history.replaceState(null, '', url.toString());
+}
+
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const onSearch = debounce(() => {
+  query = document.getElementById('artifacts-search').value;
+  syncUrlQuery(query);
+  applyFilter();
+}, 80);
+
+// Hydrate from ?q=… on load
+(function hydrateQuery() {
+  const initial = new URLSearchParams(window.location.search).get('q') || '';
+  if (initial) {
+    query = initial;
+    document.getElementById('artifacts-search').value = initial;
+  }
+})();
+
+document.getElementById('artifacts-search').addEventListener('input', onSearch);
+document.getElementById('load-more').addEventListener('click', loadPage);
+loadPage();
+</script>
+{% endblock %}
