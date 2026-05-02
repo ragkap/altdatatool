@@ -44,8 +44,8 @@
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    <div id="chart-warnings"></div>
   </div>
+  <div id="chart-warnings"></div>
 </div>
 
 <div id="error-box"></div>
@@ -76,12 +76,26 @@ function syncTicker() {
 
 syncTicker();
 
+(function applyUrlParams() {
+  const p = AltData.readUrlParams();
+  if (p.keywords && p.keywords.length) kwInput.set(p.keywords);
+  if (p.years) {
+    activeYears = +p.years;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', +x.dataset.years === activeYears);
+    });
+  }
+})();
+
 (function rehydrate() {
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) return;
   const cached = AltData.loadResult('2');
   if (!cached) return;
   if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
+  const url = AltData.readUrlParams();
+  if (url.years && +url.years !== cached.params.years) return;
+  if (url.keywords && url.keywords.length && url.keywords.join(',') !== (cached.params.keywords || []).join(',')) return;
   if (cached.params.keywords) kwInput.set(cached.params.keywords);
   if (cached.params.years) {
     activeYears = +cached.params.years;
@@ -89,10 +103,22 @@ syncTicker();
       x.classList.toggle('active', +x.dataset.years === activeYears);
     });
   }
+  AltData.writeUrlParams({
+    keywords: cached.params.keywords,
+    years: cached.params.years,
+  });
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').textContent = statusLine(cached.data);
   renderChart(cached.data);
   AltData.renderWarnings(document.getElementById('chart-warnings'), cached.data.warnings);
+})();
+
+(function autoRunFromUrl() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  if (document.getElementById('chart-card').style.display !== 'none') return;
+  const p = AltData.readUrlParams();
+  if (p.keywords && p.keywords.length) runStudy();
 })();
 
 function statusLine(d) {
@@ -133,6 +159,8 @@ async function runStudy() {
   btn.innerHTML = '<span class="spinner"></span> Running…';
   clearError();
 
+  AltData.writeUrlParams({ keywords: kws, years });
+
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching Trends + price…';
 
@@ -168,7 +196,11 @@ function renderChart(data) {
   const ctx = document.getElementById('chart').getContext('2d');
   const opts = AltData.baseChartOptions();
   opts.scales.ySignal.title.text = 'Search Interest YoY (%)';
-  opts.scales.ySignal.ticks.callback = v => v + '%';
+  opts.scales.ySignal.ticks.callback = v => Math.round(v) + '%';
+  const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
+  const signalBounds = AltData.tightAxisBounds(yoyPts.map(p => p.y), 0.08);
+  if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
+  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
   const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
   opts.plugins.title.text =
     `${(t && t.name) || ''}${tickerSuffix}: Google Search Interest YoY vs Share Price`;
@@ -177,25 +209,35 @@ function renderChart(data) {
     `Keywords: ${(data.keywords || []).join(' + ')}`,
   ];
 
+  // Per-bar colour: red below 0, accent at/above 0.
+  const NEG = 'rgba(210,75,75,0.55)';
+  const POS = 'rgba(36,169,167,0.55)';
+  const yoyColors = yoyPts.map(p => (p.y < 0 ? NEG : POS));
+
   chart = new Chart(ctx, {
-    type: 'line',
+    type: 'bar',
     data: {
       datasets: [
         {
+          type: 'line',
           label: 'Share price',
           data: pricePts,
           yAxisID: 'yPrice',
           borderColor: PRICE_COLOR,
           backgroundColor: PRICE_COLOR,
           borderWidth: 1.6, pointRadius: 0, tension: 0.15,
+          order: 0,
         },
         {
+          type: 'bar',
           label: 'Search Interest YoY',
           data: yoyPts,
           yAxisID: 'ySignal',
-          borderColor: ACCENT,
-          backgroundColor: 'rgba(36,169,167,0.08)',
-          borderWidth: 1.6, pointRadius: 0, tension: 0.15, fill: true,
+          backgroundColor: yoyColors,
+          borderWidth: 0,
+          barPercentage: 1.0,
+          categoryPercentage: 0.95,
+          order: 1,
         },
       ],
     },

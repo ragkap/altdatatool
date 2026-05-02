@@ -13,12 +13,22 @@ const AltData = (() => {
 
   const _syncUrl = (t) => {
     const url = new URL(window.location.href);
-    if (t && t.slug) url.searchParams.set('ticker', t.slug);
-    else url.searchParams.delete('ticker');
+    if (t && t.slug) {
+      url.searchParams.set('ticker', t.slug);
+    } else {
+      // Cleared ticker: drop everything study-related too
+      url.searchParams.delete('ticker');
+      url.searchParams.delete('keywords');
+      url.searchParams.delete('pages');
+      url.searchParams.delete('range');
+      url.searchParams.delete('years');
+    }
     history.replaceState(null, '', url.toString());
-    // also update sidebar links so navigation preserves the ticker
+    // Sidebar links: only carry the ticker forward across studies; study-specific
+    // params (keywords/pages/range/years) are reset when navigating to another study.
     document.querySelectorAll('.sidebar-item').forEach(a => {
       const u = new URL(a.href, window.location.origin);
+      ['keywords', 'pages', 'range', 'years'].forEach(k => u.searchParams.delete(k));
       if (t && t.slug) u.searchParams.set('ticker', t.slug);
       else u.searchParams.delete('ticker');
       a.href = u.pathname + u.search;
@@ -319,8 +329,9 @@ const AltData = (() => {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      // Reserve room at the bottom for the Smartkarma logo strip
-      layout: { padding: { bottom: 44 } },
+      // Reserve room at the bottom for the Smartkarma logo strip (logo is ~22px,
+      // and we want clear space between the rotated x-axis labels and the logo).
+      layout: { padding: { bottom: 60 } },
       plugins: {
         title: {
           display: true,
@@ -340,7 +351,15 @@ const AltData = (() => {
         },
         legend: {
           position: 'top', align: 'end',
-          labels: { boxWidth: 12, boxHeight: 12, padding: 16, font: { family: 'Roboto', size: 12 } },
+          labels: {
+            boxWidth: 12, boxHeight: 12, padding: 16,
+            font: { family: 'Roboto', size: 12 },
+            // Hide legend entries for datasets that have no data points
+            filter: (item, chartData) => {
+              const ds = chartData.datasets[item.datasetIndex];
+              return ds && Array.isArray(ds.data) && ds.data.length > 0;
+            },
+          },
         },
         tooltip: {
           backgroundColor: '#1a1f24',
@@ -388,26 +407,81 @@ const AltData = (() => {
   }
   _loadSkLogo();
 
-  // Chart.js plugin: paints the Smartkarma logo on the bottom-right of the canvas.
-  // Drawing on the canvas means the branding is included in toDataURL() exports.
+  // Chart.js plugin: paints the Smartkarma logo at the bottom-right, aligned
+  // with the chart area's right edge. Drawn on the canvas so it's baked into
+  // toDataURL() exports.
   const SmartkarmaWatermark = {
     id: 'smartkarmaWatermark',
     afterDraw(chart) {
       const img = _skLogoImg;
       if (!img || !img.complete || !img.naturalWidth) return;
-      const { ctx, width, height } = chart;
-      const padX = 14;
-      const padY = 10;
-      const logoH = 24;
+      const { ctx, chartArea, height } = chart;
+      const logoH = 22;
       const ratio = img.naturalWidth / img.naturalHeight;
       const logoW = logoH * ratio;
+      const rightEdge = (chartArea && chartArea.right) || chart.width;
+      const bottomPad = 10;
       ctx.save();
-      ctx.drawImage(img, width - padX - logoW, height - padY - logoH, logoW, logoH);
+      // High-quality downscale: the source is 1000x190 px, we draw at ~22px tall.
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, rightEdge - logoW, height - bottomPad - logoH, logoW, logoH);
       ctx.restore();
     },
   };
+  // Faded "Smartkarma" wordmark drawn behind the chart data, centered in the
+  // chart area. Uses beforeDatasetsDraw so it sits under the lines/bars but
+  // above the gridlines.
+  const SmartkarmaCenterMark = {
+    id: 'smartkarmaCenterMark',
+    beforeDatasetsDraw(chart) {
+      const { ctx, chartArea } = chart;
+      if (!chartArea) return;
+      const cx = (chartArea.left + chartArea.right) / 2;
+      const cy = (chartArea.top + chartArea.bottom) / 2;
+      // Scale the wordmark to roughly half the chart width
+      const targetWidth = (chartArea.right - chartArea.left) * 0.45;
+      ctx.save();
+      ctx.font = '700 64px Roboto, sans-serif';
+      // Pre-measure to scale to targetWidth
+      const measured = ctx.measureText('Smartkarma').width;
+      const scale = targetWidth / measured;
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(36, 169, 167, 0.07)';
+      ctx.fillText('Smartkarma', 0, 0);
+      ctx.restore();
+    },
+  };
+
   if (typeof Chart !== 'undefined') {
     Chart.register(SmartkarmaWatermark);
+    Chart.register(SmartkarmaCenterMark);
+  }
+
+  // Compute axis bounds that hug the data: [min * (1 - pad), max * (1 + pad)].
+  // For series that cross zero, expand symmetrically by pad of the absolute span.
+  function tightAxisBounds(values, pad = 0.05) {
+    const nums = values.filter(v => Number.isFinite(v));
+    if (!nums.length) return null;
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    if (min === max) {
+      // flat series: centre the value with a small visible band
+      const delta = Math.abs(min) * pad || 1;
+      return { min: min - delta, max: max + delta };
+    }
+    if (min >= 0) {
+      return { min: min * (1 - pad), max: max * (1 + pad) };
+    }
+    if (max <= 0) {
+      return { min: min * (1 + pad), max: max * (1 - pad) };
+    }
+    // crosses zero: pad both ends by `pad` of the span
+    const span = max - min;
+    return { min: min - span * pad, max: max + span * pad };
   }
 
   function setChartTitle(chart, text) {
@@ -420,14 +494,17 @@ const AltData = (() => {
   // ---- Export helpers ----
   function downloadChartPng(chart, filename) {
     if (!chart) return;
-    // Re-render onto an offscreen canvas with white background so exports aren't transparent
+    // Re-render onto an offscreen canvas with white background and padding
+    // so exports aren't transparent and have breathing room around them.
     const src = chart.canvas;
+    const pad = 24;
     const off = document.createElement('canvas');
-    off.width = src.width; off.height = src.height;
+    off.width = src.width + pad * 2;
+    off.height = src.height + pad * 2;
     const c = off.getContext('2d');
     c.fillStyle = '#ffffff';
     c.fillRect(0, 0, off.width, off.height);
-    c.drawImage(src, 0, 0);
+    c.drawImage(src, pad, pad);
     const url = off.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = url; a.download = filename || 'altdata-chart.png';
@@ -480,6 +557,38 @@ const AltData = (() => {
     el._t = setTimeout(() => el.classList.remove('show'), ms);
   }
 
+  // ---- URL params for shareable study links ----
+  // Reads / writes the chart's input params (keywords, pages, range, years) on
+  // top of the existing ?ticker=. Keeps the URL the source of truth so a copied
+  // link reproduces the chart on someone else's machine.
+  function urlParams() {
+    return new URLSearchParams(window.location.search);
+  }
+
+  function readUrlParams() {
+    const p = urlParams();
+    const out = {};
+    if (p.has('keywords')) out.keywords = p.get('keywords').split(',').map(s => s.trim()).filter(Boolean);
+    if (p.has('pages')) out.pages = p.get('pages').split(',').map(s => s.trim()).filter(Boolean);
+    if (p.has('range')) out.range = p.get('range');
+    if (p.has('years')) out.years = parseInt(p.get('years'), 10) || null;
+    return out;
+  }
+
+  function writeUrlParams(updates) {
+    const url = new URL(window.location.href);
+    Object.entries(updates).forEach(([k, v]) => {
+      if (v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) {
+        url.searchParams.delete(k);
+      } else if (Array.isArray(v)) {
+        url.searchParams.set(k, v.join(','));
+      } else {
+        url.searchParams.set(k, String(v));
+      }
+    });
+    history.replaceState(null, '', url.toString());
+  }
+
   // Persist the last study result so navigating between studies keeps it visible.
   const STUDY_RESULT_KEY = (id) => `altdata.study.${id}`;
   function saveResult(studyId, payload) {
@@ -504,5 +613,7 @@ const AltData = (() => {
     saveResult, loadResult, clearResult,
     downloadChartPng, copyEmbedSnippet, buildEmbedSnippet, toast,
     setChartTitle, renderWarnings,
+    readUrlParams, writeUrlParams,
+    tightAxisBounds,
   };
 })();

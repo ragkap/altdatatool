@@ -44,8 +44,8 @@
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    <div id="chart-warnings"></div>
   </div>
+  <div id="chart-warnings"></div>
 </div>
 
 <div id="error-box"></div>
@@ -76,6 +76,18 @@ function syncTicker() {
 
 syncTicker();
 
+// Apply URL params to form first (so a shared link pre-fills the inputs)
+(function applyUrlParams() {
+  const p = AltData.readUrlParams();
+  if (p.keywords && p.keywords.length) kwInput.set(p.keywords);
+  if (p.range) {
+    activeRange = p.range;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+})();
+
 // Restore last result if it matches current ticker
 (function rehydrate() {
   const t = AltData.get();
@@ -83,7 +95,11 @@ syncTicker();
   const cached = AltData.loadResult('1');
   if (!cached) return;
   if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
-  // Reflect stored params in the form
+  // Only rehydrate cached chart if URL params (if any) match the cached params
+  const url = AltData.readUrlParams();
+  if (url.range && url.range !== cached.params.range) return;
+  if (url.keywords && url.keywords.length && url.keywords.join(',') !== (cached.params.keywords || []).join(',')) return;
+  // Reflect cached form state in inputs and URL so the link is shareable
   if (cached.params.keywords) kwInput.set(cached.params.keywords);
   if (cached.params.range) {
     activeRange = cached.params.range;
@@ -91,10 +107,25 @@ syncTicker();
       x.classList.toggle('active', x.dataset.range === activeRange);
     });
   }
+  AltData.writeUrlParams({
+    keywords: cached.params.keywords,
+    range: cached.params.range,
+  });
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').textContent = statusLine(cached.data);
   renderChart(cached.data);
   AltData.renderWarnings(document.getElementById('chart-warnings'), cached.data.warnings);
+})();
+
+// Auto-run if URL has both keywords and a ticker but no cached chart is showing
+(function autoRunFromUrl() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  if (document.getElementById('chart-card').style.display !== 'none') return;
+  const p = AltData.readUrlParams();
+  if (p.keywords && p.keywords.length) {
+    runStudy();
+  }
 })();
 
 function statusLine(d) {
@@ -135,6 +166,9 @@ async function runStudy() {
   btn.innerHTML = '<span class="spinner"></span> Running…';
   clearError();
 
+  // Reflect inputs in the URL so the link is shareable
+  AltData.writeUrlParams({ keywords: kws, range: activeRange });
+
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching Trends + price…';
 
@@ -170,8 +204,10 @@ function renderChart(data) {
   const ctx = document.getElementById('chart').getContext('2d');
   const opts = AltData.baseChartOptions();
   opts.scales.ySignal.title.text = 'Search Interest (0–100)';
-  opts.scales.ySignal.min = 0;
-  opts.scales.ySignal.max = 100;
+  const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
+  const signalBounds = AltData.tightAxisBounds(trendPts.map(p => p.y), 0.05);
+  if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
+  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
   const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
   opts.plugins.title.text =
     `${(t && t.name) || ''}${tickerSuffix}: Google Search Interest vs Share Price`;
@@ -181,23 +217,29 @@ function renderChart(data) {
   ];
 
   chart = new Chart(ctx, {
-    type: 'line',
+    type: 'bar',
     data: {
       datasets: [
         {
+          type: 'line',
           label: 'Share price',
           data: pricePts,
           yAxisID: 'yPrice',
           borderColor: PRICE_COLOR, backgroundColor: PRICE_COLOR,
           borderWidth: 1.6, pointRadius: 0, tension: 0.15,
+          order: 0,  // draw on top of bars
         },
         {
+          type: 'bar',
           label: 'Search Interest',
           data: trendPts,
           yAxisID: 'ySignal',
-          borderColor: ACCENT,
-          backgroundColor: 'rgba(36,169,167,0.08)',
-          borderWidth: 1.6, pointRadius: 0, tension: 0.15, fill: true,
+          backgroundColor: 'rgba(36,169,167,0.45)',
+          borderColor: 'rgba(36,169,167,0.6)',
+          borderWidth: 0,
+          barPercentage: 1.0,
+          categoryPercentage: 0.95,
+          order: 1,
         },
       ],
     },

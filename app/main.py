@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.services import prices, tickers, trends, wiki
+from app.services import prices, smartscore, tickers, trends, wiki
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Alt-Data Analysis Tool")
@@ -19,6 +19,7 @@ STUDIES = [
     {"id": "1", "num": "01", "title": "Google Search Interest", "subtitle": ""},
     {"id": "2", "num": "02", "title": "Google Search Interest YoY", "subtitle": ""},
     {"id": "3", "num": "03", "title": "Wikipedia Pageviews", "subtitle": ""},
+    {"id": "4", "num": "04", "title": "Smartkarma SmartScore", "subtitle": ""},
 ]
 
 
@@ -121,8 +122,17 @@ def api_study2_yoy(
         df = pd.DataFrame(series)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
-        # Trends weekly cadence -> 52-period shift for YoY
-        prev = df["value"].shift(52)
+        # Trends downsamples cadence based on range length:
+        #   <=4 years -> weekly (so 1Y back = shift 52)
+        #   >4 years  -> monthly (so 1Y back = shift 12)
+        # Detect from the median spacing between consecutive timestamps.
+        if len(df) >= 2:
+            spacings = df["date"].diff().dt.days.dropna()
+            median_days = float(spacings.median())
+        else:
+            median_days = 7.0
+        shift_periods = 12 if median_days >= 20 else 52
+        prev = df["value"].shift(shift_periods)
         df["yoy"] = (df["value"] / prev - 1.0) * 100.0
         df.loc[~prev.gt(0), "yoy"] = None  # avoid div-by-zero blowups
         for d, raw, y in zip(df["date"], df["value"], df["yoy"]):
@@ -285,6 +295,54 @@ def api_study3(
             "range": {"key": range.upper(), "start": start, "end": end},
             "pageviews": aggregated,
             "by_title": by_title,
+            "prices": price_data,
+            "warnings": warnings,
+        }
+    )
+
+
+@app.get("/api/study4")
+def api_study4(
+    bloomberg_ticker: str = Query(...),
+    yahoo_ticker: str = Query(""),
+    range: str = Query("1Y", description="1Y | 3Y | 5Y"),
+):
+    """Smartkarma SmartScore vs Share Price."""
+    if not bloomberg_ticker:
+        raise HTTPException(status_code=400, detail="bloomberg_ticker required")
+
+    start, end = _resolve_range(range)
+    warnings: list[dict] = []
+
+    smart: list[dict] = []
+    try:
+        smart = smartscore.fetch(bloomberg_ticker, start, end)
+        if not smart:
+            warnings.append({
+                "source": "SmartScore",
+                "message": f"No SmartScore snapshots found for {bloomberg_ticker} over this range.",
+            })
+    except Exception:
+        warnings.append({
+            "source": "SmartScore",
+            "message": f"Couldn't load SmartScore data for {bloomberg_ticker}.",
+        })
+
+    price_data: list[dict] = []
+    try:
+        price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
+
+    return JSONResponse(
+        {
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "range": {"key": range.upper(), "start": start, "end": end},
+            "smart_score": smart,
             "prices": price_data,
             "warnings": warnings,
         }

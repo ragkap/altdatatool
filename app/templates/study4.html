@@ -1,10 +1,10 @@
 {% extends "_base.html" %}
-{% block title %}Study 3 · Wikipedia Pageviews · Smartkarma Alt-Data Analysis Tool{% endblock %}
+{% block title %}Study 4 · Smartkarma SmartScore · Smartkarma Alt-Data Analysis Tool{% endblock %}
 {% block content %}
 <div class="study-header">
-  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 03</div>
-  <h1>Wikipedia Pageviews vs Share Price</h1>
-  <p class="muted study-desc">Sum of daily Wikipedia pageviews across up to 5 articles, plotted against share price.</p>
+  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 04</div>
+  <h1>Smartkarma SmartScore vs Share Price</h1>
+  <p class="muted study-desc">Country-and-sector SmartScore snapshots over time, plotted against share price.</p>
 </div>
 
 <div id="needs-ticker" class="card no-ticker" style="display:none">
@@ -15,16 +15,11 @@
 <div id="study-content" style="display:none">
   <div class="card">
     <div class="toolbar">
-      <div class="field" style="flex:1 1 480px">
-        <label>Wikipedia pages</label>
-        <div id="wiki-input"></div>
-        <div class="field-hint">Up to 5 articles. Daily pageviews are summed across them.</div>
-      </div>
       <div class="field" style="min-width:240px">
         <label>Range</label>
         <div class="range-group" id="range-group">
-          <button data-range="1Y" class="active">1Y</button>
-          <button data-range="3Y">3Y</button>
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y" class="active">3Y</button>
           <button data-range="5Y">5Y</button>
         </div>
       </div>
@@ -53,11 +48,8 @@
 
 {% block scripts %}
 <script>
-let wikiInput;
 let chart;
-let activeRange = '1Y';
-
-wikiInput = AltData.mountWikiPageInput(document.getElementById('wiki-input'), { max: 5 });
+let activeRange = '3Y';
 
 document.querySelectorAll('#range-group button').forEach(b => {
   b.addEventListener('click', () => {
@@ -77,7 +69,6 @@ syncTicker();
 
 (function applyUrlParams() {
   const p = AltData.readUrlParams();
-  if (p.pages && p.pages.length) wikiInput.set(p.pages);
   if (p.range) {
     activeRange = p.range;
     document.querySelectorAll('#range-group button').forEach(x => {
@@ -89,23 +80,18 @@ syncTicker();
 (function rehydrate() {
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) return;
-  const cached = AltData.loadResult('3');
+  const cached = AltData.loadResult('4');
   if (!cached) return;
   if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
   const url = AltData.readUrlParams();
   if (url.range && url.range !== cached.params.range) return;
-  if (url.pages && url.pages.length && url.pages.join(',') !== (cached.params.titles || []).join(',')) return;
-  if (cached.params.titles) wikiInput.set(cached.params.titles);
   if (cached.params.range) {
     activeRange = cached.params.range;
     document.querySelectorAll('#range-group button').forEach(x => {
       x.classList.toggle('active', x.dataset.range === activeRange);
     });
   }
-  AltData.writeUrlParams({
-    pages: cached.params.titles,
-    range: cached.params.range,
-  });
+  AltData.writeUrlParams({ range: cached.params.range });
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').textContent = statusLine(cached.data);
   renderChart(cached.data);
@@ -116,19 +102,19 @@ syncTicker();
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) return;
   if (document.getElementById('chart-card').style.display !== 'none') return;
-  const p = AltData.readUrlParams();
-  if (p.pages && p.pages.length) runStudy();
+  // Always auto-run for Study 4 since there are no keyword/page inputs to wait on
+  runStudy();
 })();
 
 function statusLine(d) {
-  return `${(d.pageviews || []).length} daily pv points · ${(d.prices || []).length} price points`;
+  return `${(d.smart_score || []).length} score points · ${(d.prices || []).length} price points`;
 }
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
 AltData.subscribe((t) => {
   const newBb = (t || {}).bloomberg_ticker || null;
   if (newBb !== lastBloomberg) {
-    AltData.clearResult('3');
+    AltData.clearResult('4');
     document.getElementById('chart-card').style.display = 'none';
     if (chart) { chart.destroy(); chart = null; }
     lastBloomberg = newBb;
@@ -139,40 +125,37 @@ AltData.subscribe((t) => {
 document.getElementById('run-btn').addEventListener('click', runStudy);
 document.getElementById('dl-png').addEventListener('click', () => {
   const t = AltData.get();
-  AltData.downloadChartPng(chart, `study3-${(t && t.slug) || 'chart'}-${activeRange}.png`);
+  AltData.downloadChartPng(chart, `study4-${(t && t.slug) || 'chart'}-${activeRange}.png`);
 });
 document.getElementById('cp-embed').addEventListener('click', async () => {
-  const ok = await AltData.copyEmbedSnippet({ title: 'Wikipedia Pageviews vs Share Price' });
+  const ok = await AltData.copyEmbedSnippet({ title: 'Smartkarma SmartScore vs Share Price' });
   if (ok) AltData.toast('Embed code copied');
 });
 
 async function runStudy() {
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) { showError('Selected company has no Bloomberg ticker.'); return; }
-  const titles = wikiInput.get();
-  if (!titles.length) { showError('Add at least one Wikipedia page.'); return; }
 
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Running…';
   clearError();
 
-  AltData.writeUrlParams({ pages: titles, range: activeRange });
+  AltData.writeUrlParams({ range: activeRange });
 
   document.getElementById('chart-card').style.display = '';
-  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching pageviews + price…';
+  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching SmartScore + price…';
 
   try {
-    const url = `/api/study3?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
+    const url = `/api/study4?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
       + `&yahoo_ticker=${encodeURIComponent(t.yahoo_ticker || '')}`
-      + `&pages=${encodeURIComponent(titles.join(','))}`
       + `&range=${activeRange}`;
     const data = await AltData.jsonGet(url);
     renderChart(data);
     document.getElementById('chart-status').textContent = statusLine(data);
     AltData.renderWarnings(document.getElementById('chart-warnings'), data.warnings);
-    AltData.saveResult('3', {
-      params: { bloomberg_ticker: t.bloomberg_ticker, titles, range: activeRange },
+    AltData.saveResult('4', {
+      params: { bloomberg_ticker: t.bloomberg_ticker, range: activeRange },
       data,
     });
   } catch (e) {
@@ -185,51 +168,92 @@ async function runStudy() {
   }
 }
 
+// Score-to-color: single-hue accent ramp.
+// Lowest visible score = pale accent, highest = full accent. No reds, no greys.
+function makeScoreColorer(minScore, maxScore) {
+  const ACC = [36, 169, 167];     // full accent green/teal
+  const PALE = [180, 220, 219];   // very pale tint of the accent
+  return function (score, alpha = 1) {
+    let k;
+    if (maxScore === minScore) {
+      k = 1; // flat series — show the full accent
+    } else {
+      k = (score - minScore) / (maxScore - minScore);
+      k = Math.max(0, Math.min(1, k));
+    }
+    const r = Math.round(PALE[0] + (ACC[0] - PALE[0]) * k);
+    const g = Math.round(PALE[1] + (ACC[1] - PALE[1]) * k);
+    const b = Math.round(PALE[2] + (ACC[2] - PALE[2]) * k);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+}
+
 function renderChart(data) {
   const t = AltData.get();
-  const pvPts = (data.pageviews || []).map(p => ({ x: p.date, y: p.views }));
+  const scorePts = (data.smart_score || []).map(p => ({ x: p.date, y: p.score }));
   const pricePts = (data.prices || []).map(p => ({ x: p.date, y: p.close }));
 
   if (chart) chart.destroy();
   const ctx = document.getElementById('chart').getContext('2d');
   const opts = AltData.baseChartOptions();
-  opts.scales.ySignal.title.text = 'Wikipedia pageviews / day (sum)';
-  opts.scales.ySignal.ticks.callback = (v) => v >= 1000 ? (v/1000).toFixed(0)+'k' : v;
+  opts.scales.ySignal.title.text = 'SmartScore (1–5)';
   const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
-  const signalBounds = AltData.tightAxisBounds(pvPts.map(p => p.y), 0.05);
   if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
-  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
+  // SmartScore axis: snap to 0.5 increments around the data's actual range
+  if (scorePts.length) {
+    const sLo = Math.min(...scorePts.map(p => p.y));
+    const sHi = Math.max(...scorePts.map(p => p.y));
+    opts.scales.ySignal.min = Math.floor(sLo * 2) / 2;
+    opts.scales.ySignal.max = Math.ceil(sHi * 2) / 2;
+    opts.scales.ySignal.ticks.stepSize = 0.5;
+  }
   const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
   opts.plugins.title.text =
-    `${(t && t.name) || ''}${tickerSuffix}: Wikipedia Pageviews vs Share Price`;
+    `${(t && t.name) || ''}${tickerSuffix}: Smartkarma SmartScore vs Share Price`;
+
+  // Compute relative colour gradient: lowest score in this window = red, highest = green.
+  const scoreYs = scorePts.map(p => p.y);
+  const sMin = scoreYs.length ? Math.min(...scoreYs) : 1;
+  const sMax = scoreYs.length ? Math.max(...scoreYs) : 5;
+  const scoreColor = makeScoreColorer(sMin, sMax);
+
+  const colorLine = (sMin === sMax)
+    ? `SmartScore is flat at ${sMin.toFixed(1)} over this window.`
+    : `Line shade: pale = window low (${sMin.toFixed(1)}), full accent = window high (${sMax.toFixed(1)}).`;
   opts.plugins.subtitle.text = [
-    'Sum of daily Wikipedia pageviews across up to 5 articles, plotted against share price.',
-    `Pages: ${(data.titles || []).map(s => s.replace(/_/g, ' ')).join(' + ')}`,
+    'Country-and-sector SmartScore snapshots over time, plotted against share price.',
+    colorLine,
   ];
 
+  // Each segment is the held value between snapshot N and snapshot N+1.
+  // With stepped: 'before', the horizontal of segment N→N+1 sits at value N+1,
+  // so colour the segment by p1's score.
+  const segBorder = (segCtx) => scoreColor(segCtx.p1.parsed.y, 0.95);
+
   chart = new Chart(ctx, {
-    type: 'bar',
+    type: 'line',
     data: {
       datasets: [
         {
-          type: 'line',
           label: 'Share price',
           data: pricePts,
           yAxisID: 'yPrice',
           borderColor: PRICE_COLOR, backgroundColor: PRICE_COLOR,
           borderWidth: 1.6, pointRadius: 0, tension: 0.15,
-          order: 0,
         },
         {
-          type: 'bar',
-          label: 'Wikipedia pageviews',
-          data: pvPts,
+          label: 'SmartScore',
+          data: scorePts,
           yAxisID: 'ySignal',
-          backgroundColor: 'rgba(36,169,167,0.45)',
-          borderWidth: 0,
-          barPercentage: 1.0,
-          categoryPercentage: 0.95,
-          order: 1,
+          // Default border (used by legend swatch) — always the full accent
+          borderColor: ACCENT,
+          borderWidth: 2.4,
+          pointRadius: 3,
+          pointBackgroundColor: (ctx) => scoreColor(ctx.parsed?.y ?? 3, 1),
+          pointBorderColor: (ctx) => scoreColor(ctx.parsed?.y ?? 3, 1),
+          stepped: 'before',
+          fill: false,
+          segment: { borderColor: segBorder },
         },
       ],
     },
