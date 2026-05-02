@@ -500,6 +500,33 @@ button.ghost {
 }
 .toast.show { opacity: 1; }
 
+.warnings {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.warning-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff7e6;
+  border: 1px solid #f0d294;
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: #6b4a14;
+  line-height: 1.4;
+}
+.warning-item .warning-icon {
+  flex: 0 0 auto;
+  color: #c98a1f;
+  font-size: 13px;
+  line-height: 1;
+  margin-top: 1px;
+}
+.warning-item b { color: #5a3e10; }
+
 /* ---------------------------------------------------------------- */
 /* Responsive                                                       */
 /* ---------------------------------------------------------------- */

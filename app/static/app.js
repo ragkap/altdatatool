@@ -452,6 +452,21 @@ const AltData = (() => {
     }
   }
 
+  function renderWarnings(el, warnings) {
+    if (!el) return;
+    if (!warnings || !warnings.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="warnings">
+        ${warnings.map(w => `
+          <div class="warning-item">
+            <span class="warning-icon">⚠</span>
+            <span><b>${w.source}:</b> ${w.message}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function toast(msg, ms = 1800) {
     let el = document.querySelector('.toast');
     if (!el) {
@@ -488,6 +503,6 @@ const AltData = (() => {
     hydrateFromUrl: _hydrateFromUrl,
     saveResult, loadResult, clearResult,
     downloadChartPng, copyEmbedSnippet, buildEmbedSnippet, toast,
-    setChartTitle,
+    setChartTitle, renderWarnings,
   };
 })();

@@ -44,6 +44,7 @@
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
+    <div id="chart-warnings"></div>
   </div>
 </div>
 
@@ -91,10 +92,14 @@ syncTicker();
     });
   }
   document.getElementById('chart-card').style.display = '';
-  document.getElementById('chart-status').textContent =
-    `${cached.data.trends.length} trends points · ${cached.data.prices.length} price points`;
+  document.getElementById('chart-status').textContent = statusLine(cached.data);
   renderChart(cached.data);
+  AltData.renderWarnings(document.getElementById('chart-warnings'), cached.data.warnings);
 })();
+
+function statusLine(d) {
+  return `${(d.trends || []).length} trends points · ${(d.prices || []).length} price points`;
+}
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
 AltData.subscribe((t) => {
@@ -140,8 +145,8 @@ async function runStudy() {
       + `&range=${activeRange}`;
     const data = await AltData.jsonGet(url);
     renderChart(data);
-    document.getElementById('chart-status').textContent =
-      `${data.trends.length} trends points · ${data.prices.length} price points`;
+    document.getElementById('chart-status').textContent = statusLine(data);
+    AltData.renderWarnings(document.getElementById('chart-warnings'), data.warnings);
     AltData.saveResult('1', {
       params: { bloomberg_ticker: t.bloomberg_ticker, keywords: kws, range: activeRange },
       data,
@@ -149,6 +154,7 @@ async function runStudy() {
   } catch (e) {
     showError(e.message);
     document.getElementById('chart-status').textContent = '';
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Run study';
@@ -157,8 +163,8 @@ async function runStudy() {
 
 function renderChart(data) {
   const t = AltData.get();
-  const trendPts = data.trends.map(p => ({ x: p.date, y: p.value }));
-  const pricePts = data.prices.map(p => ({ x: p.date, y: p.close }));
+  const trendPts = (data.trends || []).map(p => ({ x: p.date, y: p.value }));
+  const pricePts = (data.prices || []).map(p => ({ x: p.date, y: p.close }));
 
   if (chart) chart.destroy();
   const ctx = document.getElementById('chart').getContext('2d');

@@ -99,14 +99,23 @@ def api_study2_yoy(
     fetch_start = fetch_start_dt.isoformat()
     end = today.isoformat()
 
+    warnings: list[dict] = []
+
+    series: list[dict] = []
     try:
         tr = trends.fetch_long_range(kw_list, fetch_start, end, geo)
-    except trends.TrendsRateLimited as e:
-        raise HTTPException(status_code=429, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"trends: {e}")
+        series = tr.get("series", []) or []
+    except trends.TrendsRateLimited:
+        warnings.append({
+            "source": "Google Trends",
+            "message": "Google rate-limited us. Search interest data is unavailable right now — please try again in a few minutes.",
+        })
+    except Exception:
+        warnings.append({
+            "source": "Google Trends",
+            "message": "Couldn't load search interest data for these keywords. Try again in a moment, or adjust the keywords.",
+        })
 
-    series = tr["series"]
     yoy: list[dict] = []
     if series:
         df = pd.DataFrame(series)
@@ -130,10 +139,14 @@ def api_study2_yoy(
                 }
             )
 
+    price_data: list[dict] = []
     try:
         price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, visible_start, end)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"prices: {e}")
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
 
     return JSONResponse(
         {
@@ -142,9 +155,10 @@ def api_study2_yoy(
             "keywords": kw_list,
             "geo": geo,
             "range": {"start": visible_start, "end": end},
-            "trends_raw": tr["series"],
+            "trends_raw": series,
             "trends_yoy": yoy,
             "prices": price_data,
+            "warnings": warnings,
         }
     )
 
@@ -175,18 +189,31 @@ def api_study1_continuous(
         raise HTTPException(status_code=400, detail="keywords required")
 
     start, end = _resolve_range(range)
+    warnings: list[dict] = []
 
+    trends_series: list[dict] = []
     try:
         tr = trends.fetch_long_range(kw_list, start, end, geo)
-    except trends.TrendsRateLimited as e:
-        raise HTTPException(status_code=429, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"trends: {e}")
+        trends_series = tr.get("series", []) or []
+    except trends.TrendsRateLimited:
+        warnings.append({
+            "source": "Google Trends",
+            "message": "Google rate-limited us. Search interest data is unavailable right now — please try again in a few minutes.",
+        })
+    except Exception:
+        warnings.append({
+            "source": "Google Trends",
+            "message": "Couldn't load search interest data for these keywords. Try again in a moment, or adjust the keywords.",
+        })
 
+    price_data: list[dict] = []
     try:
         price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"prices: {e}")
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
 
     return JSONResponse(
         {
@@ -195,8 +222,9 @@ def api_study1_continuous(
             "keywords": kw_list,
             "geo": geo,
             "range": {"key": range.upper(), "start": start, "end": end},
-            "trends": tr["series"],
+            "trends": trends_series,
             "prices": price_data,
+            "warnings": warnings,
         }
     )
 
@@ -226,15 +254,28 @@ def api_study3(
         raise HTTPException(status_code=400, detail="max 5 Wikipedia pages")
 
     start, end = _resolve_range(range)
+    warnings: list[dict] = []
+
+    aggregated: list[dict] = []
+    by_title: dict = {}
     try:
         pv = wiki.fetch_pageviews(titles, start, end)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"wiki: {e}")
+        aggregated = pv.get("aggregated", []) or []
+        by_title = pv.get("by_title", {}) or {}
+    except Exception:
+        warnings.append({
+            "source": "Wikipedia pageviews",
+            "message": "Couldn't load pageviews for these articles. Check the page titles or try again shortly.",
+        })
 
+    price_data: list[dict] = []
     try:
         price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"prices: {e}")
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
 
     return JSONResponse(
         {
@@ -242,8 +283,9 @@ def api_study3(
             "yahoo_ticker": yahoo_ticker,
             "titles": titles,
             "range": {"key": range.upper(), "start": start, "end": end},
-            "pageviews": pv["aggregated"],
-            "by_title": pv["by_title"],
+            "pageviews": aggregated,
+            "by_title": by_title,
             "prices": price_data,
+            "warnings": warnings,
         }
     )
