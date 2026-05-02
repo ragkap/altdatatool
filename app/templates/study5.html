@@ -1,10 +1,10 @@
 {% extends "_base.html" %}
-{% block title %}Study 4 · Smartkarma SmartScore · Smartkarma Alt-Data Analysis Tool{% endblock %}
+{% block title %}Study 5 · Sellside Consensus Estimates · Smartkarma Alt-Data Analysis Tool{% endblock %}
 {% block content %}
 <div class="study-header">
-  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 04</div>
-  <h1>Smartkarma SmartScore vs Share Price</h1>
-  <p class="muted study-desc">Country-and-sector SmartScore snapshots over time, plotted against share price.</p>
+  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 05</div>
+  <h1>Sellside Consensus Estimates vs Share Price</h1>
+  <p class="muted study-desc">Smartkarma's consensus sellside estimates over time, plotted against share price. Pick Sales or EPS (GAAP).</p>
 </div>
 
 <div id="needs-ticker" class="card no-ticker" style="display:none">
@@ -15,11 +15,18 @@
 <div id="study-content" style="display:none">
   <div class="card">
     <div class="toolbar">
+      <div class="field" style="min-width:280px">
+        <label>Metric</label>
+        <div class="range-group" id="metric-group">
+          <button data-metric="sales" class="active">Sales</button>
+          <button data-metric="epsgaap">EPS (GAAP)</button>
+        </div>
+      </div>
       <div class="field" style="min-width:240px">
         <label>Range</label>
         <div class="range-group" id="range-group">
-          <button data-range="1Y">1Y</button>
-          <button data-range="3Y" class="active">3Y</button>
+          <button data-range="1Y" class="active">1Y</button>
+          <button data-range="3Y">3Y</button>
           <button data-range="5Y">5Y</button>
         </div>
       </div>
@@ -49,13 +56,21 @@
 {% block scripts %}
 <script>
 let chart;
-let activeRange = '3Y';
+let activeRange = '1Y';
+let activeMetric = 'sales';
 
 document.querySelectorAll('#range-group button').forEach(b => {
   b.addEventListener('click', () => {
     document.querySelectorAll('#range-group button').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     activeRange = b.dataset.range;
+  });
+});
+document.querySelectorAll('#metric-group button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#metric-group button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeMetric = b.dataset.metric;
   });
 });
 
@@ -68,11 +83,19 @@ function syncTicker() {
 syncTicker();
 
 (function applyUrlParams() {
-  const p = AltData.readUrlParams();
-  if (p.range) {
-    activeRange = p.range;
+  const p = new URLSearchParams(window.location.search);
+  const r = p.get('range');
+  if (r) {
+    activeRange = r;
     document.querySelectorAll('#range-group button').forEach(x => {
       x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+  const m = p.get('metric');
+  if (m) {
+    activeMetric = m;
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
     });
   }
 })();
@@ -80,18 +103,27 @@ syncTicker();
 (function rehydrate() {
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) return;
-  const cached = AltData.loadResult('4');
+  const cached = AltData.loadResult('5');
   if (!cached) return;
   if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
-  const url = AltData.readUrlParams();
-  if (url.range && url.range !== cached.params.range) return;
+  const params = new URLSearchParams(window.location.search);
+  const urlRange = params.get('range');
+  const urlMetric = params.get('metric');
+  if (urlRange && urlRange !== cached.params.range) return;
+  if (urlMetric && urlMetric !== cached.params.metric) return;
   if (cached.params.range) {
     activeRange = cached.params.range;
     document.querySelectorAll('#range-group button').forEach(x => {
       x.classList.toggle('active', x.dataset.range === activeRange);
     });
   }
-  AltData.writeUrlParams({ range: cached.params.range });
+  if (cached.params.metric) {
+    activeMetric = cached.params.metric;
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
+    });
+  }
+  writeParams();
   document.getElementById('chart-card').style.display = '';
   document.getElementById('chart-status').textContent = statusLine(cached.data);
   renderChart(cached.data);
@@ -102,25 +134,35 @@ syncTicker();
   const t = AltData.get();
   if (!t || !t.bloomberg_ticker) return;
   if (document.getElementById('chart-card').style.display !== 'none') return;
-  // Always auto-run for Study 4 since there are no keyword/page inputs to wait on
   runStudy();
 })();
 
 function statusLine(d) {
-  return `${(d.smart_score || []).length} score points · ${(d.prices || []).length} price points`;
+  return `${(d.estimates || []).length} estimate points · ${(d.prices || []).length} price points`;
+}
+
+function writeParams() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('range', activeRange);
+  url.searchParams.set('metric', activeMetric);
+  history.replaceState(null, '', url.toString());
 }
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
 AltData.subscribe((t) => {
   const newBb = (t || {}).bloomberg_ticker || null;
   if (newBb !== lastBloomberg) {
-    AltData.clearResult('4');
+    AltData.clearResult('5');
     document.getElementById('chart-card').style.display = 'none';
     if (chart) { chart.destroy(); chart = null; }
     AltData.renderWarnings(document.getElementById('chart-warnings'), []);
-    activeRange = '3Y';
+    activeRange = '1Y';
+    activeMetric = 'sales';
     document.querySelectorAll('#range-group button').forEach(x => {
       x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
     });
     lastBloomberg = newBb;
   }
@@ -130,10 +172,10 @@ AltData.subscribe((t) => {
 document.getElementById('run-btn').addEventListener('click', runStudy);
 document.getElementById('dl-png').addEventListener('click', () => {
   const t = AltData.get();
-  AltData.downloadChartPng(chart, `study4-${(t && t.slug) || 'chart'}-${activeRange}.png`);
+  AltData.downloadChartPng(chart, `study5-${(t && t.slug) || 'chart'}-${activeMetric}-${activeRange}.png`);
 });
 document.getElementById('cp-embed').addEventListener('click', async () => {
-  const ok = await AltData.copyEmbedSnippet({ title: 'Smartkarma SmartScore vs Share Price' });
+  const ok = await AltData.copyEmbedSnippet({ title: 'Sellside Consensus Estimates vs Share Price' });
   if (ok) AltData.toast('Embed code copied');
 });
 
@@ -146,21 +188,22 @@ async function runStudy() {
   btn.innerHTML = '<span class="spinner"></span> Running…';
   clearError();
 
-  AltData.writeUrlParams({ range: activeRange });
+  writeParams();
 
   document.getElementById('chart-card').style.display = '';
-  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching SmartScore + price…';
+  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching consensus + price…';
 
   try {
-    const url = `/api/study4?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
+    const url = `/api/study5?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
       + `&yahoo_ticker=${encodeURIComponent(t.yahoo_ticker || '')}`
+      + `&metric=${activeMetric}`
       + `&range=${activeRange}`;
     const data = await AltData.jsonGet(url);
     renderChart(data);
     document.getElementById('chart-status').textContent = statusLine(data);
     AltData.renderWarnings(document.getElementById('chart-warnings'), data.warnings);
-    AltData.saveResult('4', {
-      params: { bloomberg_ticker: t.bloomberg_ticker, range: activeRange },
+    AltData.saveResult('5', {
+      params: { bloomberg_ticker: t.bloomberg_ticker, range: activeRange, metric: activeMetric },
       data,
     });
   } catch (e) {
@@ -173,67 +216,62 @@ async function runStudy() {
   }
 }
 
-// Score-to-color: single-hue accent ramp.
-// Lowest visible score = pale accent, highest = full accent. No reds, no greys.
-function makeScoreColorer(minScore, maxScore) {
-  const ACC = [36, 169, 167];     // full accent green/teal
-  const PALE = [180, 220, 219];   // very pale tint of the accent
-  return function (score, alpha = 1) {
-    let k;
-    if (maxScore === minScore) {
-      k = 1; // flat series — show the full accent
-    } else {
-      k = (score - minScore) / (maxScore - minScore);
-      k = Math.max(0, Math.min(1, k));
+// Centred rolling average — smooths noisy day-to-day consensus jitter so the
+// colour reflects the actual trend, not single-day flips.
+function rollingMean(values, window) {
+  const half = Math.floor(window / 2);
+  const out = new Array(values.length);
+  for (let i = 0; i < values.length; i++) {
+    let sum = 0, n = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(values.length - 1, i + half); j++) {
+      sum += values[j]; n++;
     }
-    const r = Math.round(PALE[0] + (ACC[0] - PALE[0]) * k);
-    const g = Math.round(PALE[1] + (ACC[1] - PALE[1]) * k);
-    const b = Math.round(PALE[2] + (ACC[2] - PALE[2]) * k);
-    return `rgba(${r},${g},${b},${alpha})`;
-  };
+    out[i] = n ? sum / n : values[i];
+  }
+  return out;
 }
 
 function renderChart(data) {
   const t = AltData.get();
-  const scorePts = (data.smart_score || []).map(p => ({ x: p.date, y: p.score }));
+  const estPts = (data.estimates || []).map(p => ({ x: p.date, y: p.value }));
   const pricePts = (data.prices || []).map(p => ({ x: p.date, y: p.close }));
 
   if (chart) chart.destroy();
   const ctx = document.getElementById('chart').getContext('2d');
   const opts = AltData.baseChartOptions();
-  opts.scales.ySignal.title.text = 'SmartScore (1–5)';
+  const metricLabel = data.metric_label || (data.metric === 'epsgaap' ? 'EPS (GAAP)' : 'Sales');
+  const cur = data.currency ? ` (${data.currency})` : '';
+  opts.scales.ySignal.title.text = `${metricLabel}${cur}`;
+
   const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
+  const signalBounds = AltData.tightAxisBounds(estPts.map(p => p.y), 0.05);
   if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
-  // SmartScore axis: snap to 0.5 increments around the data's actual range
-  if (scorePts.length) {
-    const sLo = Math.min(...scorePts.map(p => p.y));
-    const sHi = Math.max(...scorePts.map(p => p.y));
-    opts.scales.ySignal.min = Math.floor(sLo * 2) / 2;
-    opts.scales.ySignal.max = Math.ceil(sHi * 2) / 2;
-    opts.scales.ySignal.ticks.stepSize = 0.5;
-  }
+  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
+
   const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
   opts.plugins.title.text =
-    `${(t && t.name) || ''}${tickerSuffix}: Smartkarma SmartScore vs Share Price`;
-
-  // Compute relative colour gradient: lowest score in this window = red, highest = green.
-  const scoreYs = scorePts.map(p => p.y);
-  const sMin = scoreYs.length ? Math.min(...scoreYs) : 1;
-  const sMax = scoreYs.length ? Math.max(...scoreYs) : 5;
-  const scoreColor = makeScoreColorer(sMin, sMax);
-
-  const colorLine = (sMin === sMax)
-    ? `SmartScore is flat at ${sMin.toFixed(1)} over this window.`
-    : `Line shade: pale = window low (${sMin.toFixed(1)}), full accent = window high (${sMax.toFixed(1)}).`;
+    `${(t && t.name) || ''}${tickerSuffix}: ${metricLabel} Consensus vs Share Price`;
   opts.plugins.subtitle.text = [
-    'Country-and-sector SmartScore snapshots over time, plotted against share price.',
-    colorLine,
+    'Smartkarma consensus sellside estimates, plotted against share price.',
+    `Metric: ${metricLabel}${cur} — line: green when consensus is rising, red when falling.`,
   ];
 
-  // Each segment is the held value between snapshot N and snapshot N+1.
-  // With stepped: 'before', the horizontal of segment N→N+1 sits at value N+1,
-  // so colour the segment by p1's score.
-  const segBorder = (segCtx) => scoreColor(segCtx.p1.parsed.y, 0.95);
+  // Smooth the consensus series with a short window, then mark each point's
+  // local trend by comparing the smoothed value vs the smoothed value some
+  // days back. This drives the per-segment colour and keeps tiny revisions
+  // from flipping the colour on every step.
+  const POS = ACCENT;        // accent green for rising
+  const NEG = '#d24b4b';     // red for falling
+  const smoothWindow = 7;    // 7-day rolling mean on daily data
+  const trendLag = 14;       // compare against 2 weeks ago for direction
+  const smoothed = rollingMean(estPts.map(p => p.y), smoothWindow);
+  // Rising at index i if smoothed[i] >= smoothed[i - trendLag]
+  const isRising = smoothed.map((v, i) => {
+    const j = Math.max(0, i - trendLag);
+    return v >= smoothed[j];
+  });
+  // Per-segment colour: pick by p1 (the segment ending here)
+  const segBorder = (segCtx) => (isRising[segCtx.p1DataIndex] ? POS : NEG);
 
   chart = new Chart(ctx, {
     type: 'line',
@@ -247,16 +285,12 @@ function renderChart(data) {
           borderWidth: 1.6, pointRadius: 0, tension: 0.15,
         },
         {
-          label: 'SmartScore',
-          data: scorePts,
+          label: metricLabel,
+          data: estPts,
           yAxisID: 'ySignal',
-          // Default border (used by legend swatch) — always the full accent
-          borderColor: ACCENT,
-          borderWidth: 2.4,
-          pointRadius: 3,
-          pointBackgroundColor: (ctx) => scoreColor(ctx.parsed?.y ?? 3, 1),
-          pointBorderColor: (ctx) => scoreColor(ctx.parsed?.y ?? 3, 1),
-          stepped: 'before',
+          borderColor: ACCENT,  // legend swatch
+          backgroundColor: 'rgba(36,169,167,0.06)',
+          borderWidth: 1.8, pointRadius: 0, tension: 0.15,
           fill: false,
           segment: { borderColor: segBorder },
         },

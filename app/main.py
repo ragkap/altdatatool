@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.services import prices, smartscore, tickers, trends, wiki
+from app.services import consensus, prices, smartscore, tickers, trends, wiki
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Alt-Data Analysis Tool")
@@ -20,6 +20,7 @@ STUDIES = [
     {"id": "2", "num": "02", "title": "Google Search Interest YoY", "subtitle": ""},
     {"id": "3", "num": "03", "title": "Wikipedia Pageviews", "subtitle": ""},
     {"id": "4", "num": "04", "title": "Smartkarma SmartScore", "subtitle": ""},
+    {"id": "5", "num": "05", "title": "Sellside Consensus", "subtitle": ""},
 ]
 
 
@@ -343,6 +344,81 @@ def api_study4(
             "yahoo_ticker": yahoo_ticker,
             "range": {"key": range.upper(), "start": start, "end": end},
             "smart_score": smart,
+            "prices": price_data,
+            "warnings": warnings,
+        }
+    )
+
+
+CONSENSUS_KEYS = {
+    "sales": "Sales (Consensus)",
+    "epsgaap": "EPS GAAP (Consensus)",
+}
+
+
+@app.get("/api/study5")
+def api_study5(
+    bloomberg_ticker: str = Query(...),
+    yahoo_ticker: str = Query(""),
+    metric: str = Query("sales", description="sales | epsgaap"),
+    range: str = Query("1Y", description="1Y | 3Y | 5Y"),
+):
+    """Sellside Consensus Estimates vs Share Price.
+
+    User picks one of `sales` or `epsgaap` to plot at a time."""
+    if metric not in CONSENSUS_KEYS:
+        raise HTTPException(status_code=400, detail=f"metric must be one of {list(CONSENSUS_KEYS)}")
+
+    start, end = _resolve_range(range)
+    warnings: list[dict] = []
+
+    # Look up the entity_id from the bloomberg ticker (consensus API uses Smartkarma's
+    # internal entity-id, not the Bloomberg ticker)
+    entity = None
+    for row in tickers._all_entities():
+        if (row.get("bloomberg_ticker") or "") == bloomberg_ticker:
+            entity = row
+            break
+    if not entity or not entity.get("entity_id"):
+        warnings.append({
+            "source": "Consensus estimates",
+            "message": f"No internal entity ID found for {bloomberg_ticker}.",
+        })
+        consensus_payload = {"series": [], "currency": None}
+    else:
+        try:
+            consensus_payload = consensus.fetch(entity["entity_id"], metric, start, end)
+        except Exception:
+            warnings.append({
+                "source": "Consensus estimates",
+                "message": f"Couldn't load {CONSENSUS_KEYS[metric]} estimates for {bloomberg_ticker}.",
+            })
+            consensus_payload = {"series": [], "currency": None}
+
+    if entity and entity.get("entity_id") and not consensus_payload["series"]:
+        warnings.append({
+            "source": "Consensus estimates",
+            "message": f"No {CONSENSUS_KEYS[metric]} consensus data found for {bloomberg_ticker} over this range.",
+        })
+
+    price_data: list[dict] = []
+    try:
+        price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
+
+    return JSONResponse(
+        {
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "metric": metric,
+            "metric_label": CONSENSUS_KEYS[metric],
+            "currency": consensus_payload.get("currency"),
+            "range": {"key": range.upper(), "start": start, "end": end},
+            "estimates": consensus_payload["series"],
             "prices": price_data,
             "warnings": warnings,
         }

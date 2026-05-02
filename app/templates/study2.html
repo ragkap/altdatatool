@@ -132,6 +132,12 @@ AltData.subscribe((t) => {
     AltData.clearResult('2');
     document.getElementById('chart-card').style.display = 'none';
     if (chart) { chart.destroy(); chart = null; }
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+    kwInput.set([]);
+    activeYears = 1;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', +x.dataset.years === activeYears);
+    });
     lastBloomberg = newBb;
   }
   syncTicker();

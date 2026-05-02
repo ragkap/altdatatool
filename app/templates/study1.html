@@ -136,10 +136,17 @@ let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
 AltData.subscribe((t) => {
   const newBb = (t || {}).bloomberg_ticker || null;
   if (newBb !== lastBloomberg) {
-    // ticker actually changed: invalidate
+    // Ticker actually changed: invalidate everything tied to the old ticker
     AltData.clearResult('1');
     document.getElementById('chart-card').style.display = 'none';
     if (chart) { chart.destroy(); chart = null; }
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+    // Reset form state so old keywords don't pre-fill for the new company
+    kwInput.set([]);
+    activeRange = '1Y';
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
     lastBloomberg = newBb;
   }
   syncTicker();

@@ -11,17 +11,18 @@ const AltData = (() => {
   let current = null;
   try { current = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch {}
 
-  const _syncUrl = (t) => {
+  const _syncUrl = (t, opts = {}) => {
+    const { resetStudyParams = false } = opts;
     const url = new URL(window.location.href);
     if (t && t.slug) {
       url.searchParams.set('ticker', t.slug);
     } else {
-      // Cleared ticker: drop everything study-related too
       url.searchParams.delete('ticker');
-      url.searchParams.delete('keywords');
-      url.searchParams.delete('pages');
-      url.searchParams.delete('range');
-      url.searchParams.delete('years');
+    }
+    // When ticker changes (or is cleared), drop study-specific params since
+    // they're stale for the new company.
+    if (resetStudyParams || !t || !t.slug) {
+      ['keywords', 'pages', 'range', 'years'].forEach(k => url.searchParams.delete(k));
     }
     history.replaceState(null, '', url.toString());
     // Sidebar links: only carry the ticker forward across studies; study-specific
@@ -37,10 +38,18 @@ const AltData = (() => {
 
   const get = () => current;
   const set = (t) => {
+    const prevSlug = (current && current.slug) || null;
+    const newSlug = (t && t.slug) || null;
+    const tickerChanged = prevSlug !== newSlug;
     current = t;
     if (t) localStorage.setItem(STORAGE_KEY, JSON.stringify(t));
     else localStorage.removeItem(STORAGE_KEY);
-    _syncUrl(t);
+    _syncUrl(t, { resetStudyParams: tickerChanged });
+    if (tickerChanged) {
+      // Wipe all cached study results so a stale chart from the old ticker
+      // doesn't flash on screen during navigation.
+      ['1', '2', '3', '4'].forEach(id => clearResult(id));
+    }
     subs.forEach(fn => { try { fn(t); } catch (e) { console.error(e); } });
   };
   const subscribe = (fn) => { subs.add(fn); return () => subs.delete(fn); };

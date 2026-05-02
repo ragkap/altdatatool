@@ -21,7 +21,12 @@ def _all_entities() -> list[dict]:
     with _conn() as c, c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT bloomberg_ticker, yahoo_ticker, slug, pretty_name AS name, market_status
+            SELECT id AS entity_id,
+                   bloomberg_ticker,
+                   yahoo_ticker,
+                   slug,
+                   pretty_name AS name,
+                   market_status
             FROM entities
             """
         )
