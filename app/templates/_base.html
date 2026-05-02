@@ -54,6 +54,9 @@
   <script>
     AltData.installNavTicker(document.getElementById('nav-ticker'));
     AltData.hydrateFromUrl();
+    document.querySelectorAll('.run-btn').forEach(b => {
+      if (!b.innerHTML.trim()) b.innerHTML = AltData.RUN_BTN_LABEL;
+    });
     (function() {
       const hb = document.getElementById('hamburger');
       const sb = document.querySelector('.sidebar');

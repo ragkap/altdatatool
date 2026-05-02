@@ -553,6 +553,16 @@ const AltData = (() => {
     `;
   }
 
+  // Sparkle SVG used inside the Run study button. Inline so we can set it
+  // via innerHTML on reset without needing to fetch anything.
+  const SPARKLE_SVG = '<svg class="sparkle" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<path d="M12 2 L13.6 9.4 L21 11 L13.6 12.6 L12 20 L10.4 12.6 L3 11 L10.4 9.4 Z"/>' +
+    '<circle cx="19" cy="5" r="1.4" opacity="0.85"/>' +
+    '<circle cx="5"  cy="18" r="1"   opacity="0.7"/>' +
+    '</svg>';
+  const RUN_BTN_LABEL = SPARKLE_SVG + '<span>Run study</span>';
+  const RUN_BTN_RUNNING = '<span class="spinner"></span> Running…';
+
   function toast(msg, ms = 1800) {
     let el = document.querySelector('.toast');
     if (!el) {
@@ -624,5 +634,6 @@ const AltData = (() => {
     setChartTitle, renderWarnings,
     readUrlParams, writeUrlParams,
     tightAxisBounds,
+    RUN_BTN_LABEL, RUN_BTN_RUNNING,
   };
 })();

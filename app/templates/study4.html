@@ -23,9 +23,9 @@
           <button data-range="5Y">5Y</button>
         </div>
       </div>
-      <div class="field">
+      <div class="field run-field">
         <label>&nbsp;</label>
-        <button id="run-btn">Run study</button>
+        <button id="run-btn" class="run-btn"></button>
       </div>
     </div>
   </div>
@@ -143,7 +143,7 @@ async function runStudy() {
 
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Running…';
+  btn.innerHTML = AltData.RUN_BTN_RUNNING;
   clearError();
 
   AltData.writeUrlParams({ range: activeRange });
@@ -169,7 +169,7 @@ async function runStudy() {
     AltData.renderWarnings(document.getElementById('chart-warnings'), []);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Run study';
+    btn.innerHTML = AltData.RUN_BTN_LABEL;
   }
 }
 
