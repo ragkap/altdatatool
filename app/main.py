@@ -447,8 +447,8 @@ def api_study4(
 
 
 CONSENSUS_KEYS = {
-    "sales": "Sales (Consensus)",
-    "epsgaap": "EPS GAAP (Consensus)",
+    "sales": "Sales",
+    "epsgaap": "EPS (GAAP)",
 }
 
 
