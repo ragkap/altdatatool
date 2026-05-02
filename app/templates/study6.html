@@ -1,0 +1,267 @@
+{% extends "_base.html" %}
+{% block title %}Study 6 · Amazon Search Trends · Smartkarma Alt-Data Analysis Tool{% endblock %}
+{% block content %}
+<div class="study-header">
+  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 06</div>
+  <h1>Amazon Search Trends vs Share Price</h1>
+  <p class="muted study-desc">Monthly Amazon branded search volume (summed across terms), plotted against share price.</p>
+</div>
+
+<div id="needs-ticker" class="card no-ticker" style="display:none">
+  <div>No ticker selected.</div>
+  <div class="hint">Use the search in the header to pick a company.</div>
+</div>
+
+<div id="study-content" style="display:none">
+  <div class="card">
+    <div class="toolbar">
+      <div class="field" style="flex:1 1 320px">
+        <label>Amazon search terms</label>
+        <div id="terms-input"></div>
+        <div class="field-hint">Up to 5 product names. Volumes are summed across all terms.</div>
+      </div>
+      <div class="field" style="min-width:240px">
+        <label>Range</label>
+        <div class="range-group" id="range-group">
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y" class="active">3Y</button>
+          <button data-range="5Y">5Y</button>
+        </div>
+      </div>
+      <div class="field run-field">
+        <label>&nbsp;</label>
+        <button id="run-btn" class="run-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="chart-card" style="display:none">
+    <div class="row" style="justify-content:flex-end;gap:12px;margin-bottom:8px">
+      <span id="chart-status" class="muted"></span>
+      <div class="export-actions">
+        <button class="icon-btn" id="dl-png" title="Download as PNG">↓ PNG</button>
+        <button class="icon-btn" id="cp-embed" title="Copy embed snippet">⎘ Embed</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+  <div id="chart-warnings"></div>
+</div>
+
+<div id="error-box"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let termsInput;
+let chart;
+let activeRange = '3Y';
+
+// Reuse the keyword-style chip input — Amazon search terms are entered the same way
+termsInput = AltData.mountKeywordInput(document.getElementById('terms-input'));
+
+document.querySelectorAll('#range-group button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#range-group button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeRange = b.dataset.range;
+  });
+});
+
+function syncTicker() {
+  const t = AltData.get();
+  document.getElementById('needs-ticker').style.display = t ? 'none' : '';
+  document.getElementById('study-content').style.display = t ? '' : 'none';
+}
+
+syncTicker();
+
+(function applyUrlParams() {
+  const p = AltData.readUrlParams();
+  // Allow `terms` as a URL param (matching the form field name)
+  const terms = new URLSearchParams(window.location.search).get('terms');
+  if (terms) {
+    termsInput.set(terms.split(',').map(s => s.trim()).filter(Boolean));
+  }
+  if (p.range) {
+    activeRange = p.range;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+})();
+
+(function rehydrate() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  const cached = AltData.loadResult('6');
+  if (!cached) return;
+  if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
+  const url = AltData.readUrlParams();
+  const urlTerms = (new URLSearchParams(window.location.search).get('terms') || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (url.range && url.range !== cached.params.range) return;
+  if (urlTerms.length && urlTerms.join(',') !== (cached.params.terms || []).join(',')) return;
+  if (cached.params.terms) termsInput.set(cached.params.terms);
+  if (cached.params.range) {
+    activeRange = cached.params.range;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+  writeParams(cached.params.terms, cached.params.range);
+  document.getElementById('chart-card').style.display = '';
+  document.getElementById('chart-status').textContent = statusLine(cached.data);
+  renderChart(cached.data);
+  AltData.renderWarnings(document.getElementById('chart-warnings'), cached.data.warnings);
+})();
+
+(function autoRunFromUrl() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  if (document.getElementById('chart-card').style.display !== 'none') return;
+  const urlTerms = (new URLSearchParams(window.location.search).get('terms') || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (urlTerms.length) runStudy();
+})();
+
+function statusLine(d) {
+  return `${(d.volumes || []).length} monthly volume points · ${(d.prices || []).length} price points`;
+}
+
+function writeParams(terms, range) {
+  const url = new URL(window.location.href);
+  if (terms && terms.length) url.searchParams.set('terms', terms.join(','));
+  else url.searchParams.delete('terms');
+  if (range) url.searchParams.set('range', range);
+  history.replaceState(null, '', url.toString());
+}
+
+let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
+AltData.subscribe((t) => {
+  const newBb = (t || {}).bloomberg_ticker || null;
+  if (newBb !== lastBloomberg) {
+    AltData.clearResult('6');
+    document.getElementById('chart-card').style.display = 'none';
+    if (chart) { chart.destroy(); chart = null; }
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+    termsInput.set([]);
+    activeRange = '3Y';
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+    lastBloomberg = newBb;
+  }
+  syncTicker();
+});
+
+document.getElementById('run-btn').addEventListener('click', runStudy);
+document.getElementById('dl-png').addEventListener('click', () => {
+  const t = AltData.get();
+  AltData.downloadChartPng(chart, `study6-${(t && t.slug) || 'chart'}-${activeRange}.png`);
+});
+document.getElementById('cp-embed').addEventListener('click', async () => {
+  const ok = await AltData.copyEmbedSnippet({ title: 'Amazon Search Trends YoY vs Share Price' });
+  if (ok) AltData.toast('Embed code copied');
+});
+
+async function runStudy() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) { showError('Selected company has no Bloomberg ticker.'); return; }
+  const terms = termsInput.get();
+  if (!terms.length) { showError('Add at least one Amazon search term.'); return; }
+
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = AltData.RUN_BTN_RUNNING;
+  clearError();
+
+  writeParams(terms, activeRange);
+
+  document.getElementById('chart-card').style.display = '';
+  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching Amazon volumes + price…';
+
+  try {
+    const url = `/api/study6?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
+      + `&yahoo_ticker=${encodeURIComponent(t.yahoo_ticker || '')}`
+      + `&terms=${encodeURIComponent(terms.join(','))}`
+      + `&range=${activeRange}`;
+    const data = await AltData.jsonGet(url);
+    renderChart(data);
+    document.getElementById('chart-status').textContent = statusLine(data);
+    AltData.renderWarnings(document.getElementById('chart-warnings'), data.warnings);
+    AltData.saveResult('6', {
+      params: { bloomberg_ticker: t.bloomberg_ticker, terms, range: activeRange },
+      data,
+    });
+  } catch (e) {
+    showError(e.message);
+    document.getElementById('chart-status').textContent = '';
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = AltData.RUN_BTN_LABEL;
+  }
+}
+
+function renderChart(data) {
+  const t = AltData.get();
+  const volPts = (data.volumes || []).map(p => ({ x: p.date, y: p.volume }));
+  const pricePts = (data.prices || []).map(p => ({ x: p.date, y: p.close }));
+
+  if (chart) chart.destroy();
+  const ctx = document.getElementById('chart').getContext('2d');
+  const opts = AltData.baseChartOptions();
+  opts.scales.ySignal.title.text = 'Amazon search volume / month (sum)';
+  opts.scales.ySignal.ticks.callback = (v) => {
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'k';
+    return Math.round(v);
+  };
+  const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
+  const signalBounds = AltData.tightAxisBounds(volPts.map(p => p.y), 0.05);
+  if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
+  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
+
+  const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
+  opts.plugins.title.text =
+    `${(t && t.name) || ''}${tickerSuffix}: Amazon Search Trends vs Share Price`;
+  opts.plugins.subtitle.text = [
+    'Monthly Amazon branded search volume (summed across terms), plotted against share price.',
+    `Terms: ${(data.terms || []).join(' + ')}`,
+  ];
+
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      datasets: [
+        {
+          type: 'line',
+          label: 'Share price',
+          data: pricePts,
+          yAxisID: 'yPrice',
+          borderColor: PRICE_COLOR, backgroundColor: PRICE_COLOR,
+          borderWidth: 1.6, pointRadius: 0, tension: 0.15,
+          order: 0,
+        },
+        {
+          type: 'bar',
+          label: 'Amazon search volume',
+          data: volPts,
+          yAxisID: 'ySignal',
+          backgroundColor: 'rgba(36,169,167,0.45)',
+          borderWidth: 0,
+          barPercentage: 1.0,
+          categoryPercentage: 0.95,
+          order: 1,
+        },
+      ],
+    },
+    options: opts,
+  });
+}
+
+function showError(msg) {
+  document.getElementById('error-box').innerHTML = `<div class="error" style="margin-top:16px">${msg}</div>`;
+}
+function clearError() { document.getElementById('error-box').innerHTML = ''; }
+</script>
+{% endblock %}

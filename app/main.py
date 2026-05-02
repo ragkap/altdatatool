@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.services import artifacts, consensus, prices, smartscore, tickers, trends, wiki
+from app.services import amazon, artifacts, consensus, prices, smartscore, tickers, trends, wiki
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Alt-Data Analysis Tool")
@@ -21,6 +21,8 @@ STUDIES = [
     {"id": "3", "num": "03", "title": "Wikipedia Pageviews", "subtitle": ""},
     {"id": "4", "num": "04", "title": "Smartkarma SmartScore", "subtitle": ""},
     {"id": "5", "num": "05", "title": "Sellside Consensus", "subtitle": ""},
+    {"id": "6", "num": "06", "title": "Amazon Search Trends", "subtitle": ""},
+    {"id": "7", "num": "07", "title": "Amazon Search Trends YoY", "subtitle": ""},
 ]
 STUDY_LABELS = {s["id"]: s["title"] for s in STUDIES}
 
@@ -523,6 +525,147 @@ def api_study5(
             "currency": consensus_payload.get("currency"),
             "range": {"key": range.upper(), "start": start, "end": end},
             "estimates": consensus_payload["series"],
+            "prices": price_data,
+            "warnings": warnings,
+        }
+    )
+
+
+@app.get("/api/study6")
+def api_study6(
+    bloomberg_ticker: str = Query(...),
+    yahoo_ticker: str = Query(""),
+    terms: str = Query(..., description="comma-separated Amazon search terms (max 5)"),
+    range: str = Query("3Y", description="1Y | 3Y | 5Y"),
+):
+    """Amazon Search Trends vs Share Price.
+
+    Volumes from Momentum Commerce branded-search API are summed across all
+    terms (monthly cadence) and plotted against share price."""
+    term_list = [t.strip() for t in terms.split(",") if t.strip()]
+    if not term_list:
+        raise HTTPException(status_code=400, detail="at least one Amazon search term required")
+    if len(term_list) > 5:
+        raise HTTPException(status_code=400, detail="max 5 search terms")
+
+    start, end = _resolve_range(range)
+
+    warnings: list[dict] = []
+
+    aggregated: list[dict] = []
+    by_term: dict = {}
+    try:
+        vol = amazon.fetch_volumes(term_list, start, end)
+        aggregated = vol.get("aggregated", []) or []
+        by_term = vol.get("by_term", {}) or {}
+    except Exception:
+        warnings.append({
+            "source": "Amazon Search Trends",
+            "message": "Couldn't load Amazon search volumes for these terms. Try again in a moment, or adjust the terms.",
+        })
+
+    price_data: list[dict] = []
+    try:
+        price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
+
+    _record_artifact(
+        study_id="6",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"terms": term_list, "range": range.upper()},
+        has_data=bool(aggregated or price_data),
+    )
+
+    return JSONResponse(
+        {
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "terms": term_list,
+            "range": {"key": range.upper(), "start": start, "end": end},
+            "volumes": aggregated,
+            "by_term": by_term,
+            "prices": price_data,
+            "warnings": warnings,
+        }
+    )
+
+
+@app.get("/api/study7")
+def api_study7(
+    bloomberg_ticker: str = Query(...),
+    yahoo_ticker: str = Query(""),
+    terms: str = Query(..., description="comma-separated Amazon search terms (max 5)"),
+    range: str = Query("1Y", description="1Y | 3Y | 5Y"),
+):
+    """Amazon Search Trends YoY vs Share Price.
+
+    Same volume source as Study 6, but plotted as YoY % change. Fetches one
+    extra year of raw data so even 1Y produces a full year of YoY points."""
+    term_list = [t.strip() for t in terms.split(",") if t.strip()]
+    if not term_list:
+        raise HTTPException(status_code=400, detail="at least one Amazon search term required")
+    if len(term_list) > 5:
+        raise HTTPException(status_code=400, detail="max 5 search terms")
+
+    range_years = RANGE_PRESETS.get((range or "").upper())
+    if not range_years:
+        raise HTTPException(status_code=400, detail=f"range must be one of {list(RANGE_PRESETS)}")
+
+    today = datetime.utcnow().date()
+    visible_start_dt = today.replace(year=today.year - range_years)
+    fetch_start_dt = today.replace(year=today.year - range_years - 1)
+    visible_start = visible_start_dt.isoformat()
+    fetch_start = fetch_start_dt.isoformat()
+    end = today.isoformat()
+
+    warnings: list[dict] = []
+
+    aggregated: list[dict] = []
+    by_term: dict = {}
+    yoy_series: list[dict] = []
+    try:
+        vol = amazon.fetch_volumes(term_list, fetch_start, end)
+        aggregated = vol.get("aggregated", []) or []
+        by_term = vol.get("by_term", {}) or {}
+        yoy_full = amazon.yoy(aggregated)
+        yoy_series = [p for p in yoy_full if p["date"] >= visible_start]
+    except Exception:
+        warnings.append({
+            "source": "Amazon Search Trends",
+            "message": "Couldn't load Amazon search volumes for these terms. Try again in a moment, or adjust the terms.",
+        })
+
+    price_data: list[dict] = []
+    try:
+        price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, visible_start, end)
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
+
+    _record_artifact(
+        study_id="7",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"terms": term_list, "range": range.upper()},
+        has_data=bool(yoy_series or price_data),
+    )
+
+    return JSONResponse(
+        {
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "terms": term_list,
+            "range": {"key": range.upper(), "start": visible_start, "end": end},
+            "volumes_yoy": yoy_series,
+            "volumes_raw": aggregated,
+            "by_term": by_term,
             "prices": price_data,
             "warnings": warnings,
         }
