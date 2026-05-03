@@ -551,6 +551,8 @@ button.ghost {
 
 .range-group {
   display: inline-flex;
+  align-self: flex-start;
+  width: fit-content;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
