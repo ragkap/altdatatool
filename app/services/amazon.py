@@ -16,6 +16,7 @@ from app.services import cache
 
 APP_URL = "https://www.momentumcommerce.com/velocity/apps/amazon-search-trends"
 VOLUMES_URL = "https://www.momentumcommerce.com/api/branded-search/volumes"
+BRAND_TERMS_URL = "https://www.momentumcommerce.com/api/branded-search/brand-terms"
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -106,6 +107,46 @@ def fetch_volumes(terms: list[str], start: str, end: str) -> dict:
     }
     cache.set("amazon_volumes", key, payload, CACHE_TTL)
     return payload
+
+
+def fetch_brand_terms(brand: str, limit: int = 50) -> list[dict]:
+    """Returns Amazon search terms associated with a brand, sorted by rank
+    (lowest rank first = most popular). Each item: {term, source, branded, rank}.
+    Cached for 7 days per brand."""
+    brand = (brand or "").strip()
+    if not brand:
+        return []
+
+    key = "bt:" + hashlib.sha256(brand.lower().encode()).hexdigest()
+    cached = cache.get("amazon_brand_terms", key, CACHE_TTL)
+    if cached is None:
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            xsrf = _bootstrap_session(client)
+            r = client.post(
+                BRAND_TERMS_URL,
+                json={"brand": brand},
+                headers={
+                    "user-agent": UA,
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                    "origin": "https://www.momentumcommerce.com",
+                    "referer": f"{APP_URL}?brand={urllib.parse.quote(brand)}",
+                    "x-xsrf-token": xsrf,
+                    "x-velocity-view": "apps.amazon-search-trends",
+                    "x-request-name": "terms",
+                },
+            )
+            r.raise_for_status()
+            cached = r.json()
+        cache.set("amazon_brand_terms", key, cached, CACHE_TTL)
+
+    terms = cached.get("terms") or []
+    # Sort by rank ascending (most popular first); rank may be missing
+    terms = sorted(
+        [t for t in terms if t.get("term")],
+        key=lambda t: (t.get("rank") if t.get("rank") is not None else 1e9),
+    )
+    return terms[:limit]
 
 
 def yoy(series: list[dict]) -> list[dict]:

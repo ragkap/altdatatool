@@ -133,8 +133,9 @@ function statusLine(d) {
 }
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
-AltData.subscribe((t) => {
+AltData.subscribe((t, opts) => {
   const newBb = (t || {}).bloomberg_ticker || null;
+  if (opts && opts.hydrating) { lastBloomberg = newBb; syncTicker(); return; }
   if (newBb !== lastBloomberg) {
     // Ticker actually changed: invalidate everything tied to the old ticker
     AltData.clearResult('1');

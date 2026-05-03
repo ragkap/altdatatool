@@ -18,7 +18,8 @@
       <div class="field" style="flex:1 1 320px">
         <label>Amazon search terms</label>
         <div id="terms-input"></div>
-        <div class="field-hint">Up to 5 product names. Volumes are summed across all terms.</div>
+        <div class="field-hint">Volumes are summed across all terms.</div>
+        <div id="brand-suggester"></div>
       </div>
       <div class="field" style="min-width:240px">
         <label>Range</label>
@@ -58,6 +59,18 @@ let chart;
 let activeRange = '1Y';
 
 termsInput = AltData.mountKeywordInput(document.getElementById('terms-input'));
+
+const brandSuggester = AltData.mountBrandTermsSuggester(
+  document.getElementById('brand-suggester'),
+  {
+    initialBrand: ((AltData.get() || {}).name || '').trim(),
+    onPick: (term) => {
+      const cur = termsInput.get();
+      if (cur.includes(term)) return;
+      termsInput.set([...cur, term]);
+    },
+  }
+);
 
 document.querySelectorAll('#range-group button').forEach(b => {
   b.addEventListener('click', () => {
@@ -134,8 +147,14 @@ function writeParams(terms, range) {
 }
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
-AltData.subscribe((t) => {
+AltData.subscribe((t, opts) => {
   const newBb = (t || {}).bloomberg_ticker || null;
+  if (opts && opts.hydrating) {
+    lastBloomberg = newBb;
+    if (t && t.name) brandSuggester.setBrand(t.name);
+    syncTicker();
+    return;
+  }
   if (newBb !== lastBloomberg) {
     AltData.clearResult('7');
     document.getElementById('chart-card').style.display = 'none';
@@ -146,6 +165,7 @@ AltData.subscribe((t) => {
     document.querySelectorAll('#range-group button').forEach(x => {
       x.classList.toggle('active', x.dataset.range === activeRange);
     });
+    brandSuggester.setBrand((t && t.name) || '');
     lastBloomberg = newBb;
   }
   syncTicker();

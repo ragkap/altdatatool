@@ -126,8 +126,9 @@ function statusLine(d) {
 }
 
 let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
-AltData.subscribe((t) => {
+AltData.subscribe((t, opts) => {
   const newBb = (t || {}).bloomberg_ticker || null;
+  if (opts && opts.hydrating) { lastBloomberg = newBb; syncTicker(); return; }
   if (newBb !== lastBloomberg) {
     AltData.clearResult('2');
     document.getElementById('chart-card').style.display = 'none';

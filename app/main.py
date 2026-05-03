@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -322,6 +323,27 @@ def api_study1_continuous(
     )
 
 
+@app.get("/api/amazon/brand-terms")
+def api_amazon_brand_terms(brand: str = Query(...), limit: int = Query(50, ge=1, le=200)):
+    try:
+        return {"brand": brand, "terms": amazon.fetch_brand_terms(brand, limit=limit)}
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No Amazon brand data for \"{brand}\". Try a different brand name.",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Couldn't fetch Amazon brand terms right now. Please try again in a moment.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Couldn't fetch Amazon brand terms right now. Please try again in a moment.",
+        )
+
+
 @app.get("/api/wiki/suggest")
 def api_wiki_suggest(q: str = Query("", min_length=0), limit: int = Query(8, ge=1, le=15)):
     try:
@@ -535,7 +557,7 @@ def api_study5(
 def api_study6(
     bloomberg_ticker: str = Query(...),
     yahoo_ticker: str = Query(""),
-    terms: str = Query(..., description="comma-separated Amazon search terms (max 5)"),
+    terms: str = Query(..., description="comma-separated Amazon search terms"),
     range: str = Query("3Y", description="1Y | 3Y | 5Y"),
 ):
     """Amazon Search Trends vs Share Price.
@@ -545,8 +567,8 @@ def api_study6(
     term_list = [t.strip() for t in terms.split(",") if t.strip()]
     if not term_list:
         raise HTTPException(status_code=400, detail="at least one Amazon search term required")
-    if len(term_list) > 5:
-        raise HTTPException(status_code=400, detail="max 5 search terms")
+    if len(term_list) > 50:
+        raise HTTPException(status_code=400, detail="max 50 search terms")
 
     start, end = _resolve_range(range)
 
@@ -599,7 +621,7 @@ def api_study6(
 def api_study7(
     bloomberg_ticker: str = Query(...),
     yahoo_ticker: str = Query(""),
-    terms: str = Query(..., description="comma-separated Amazon search terms (max 5)"),
+    terms: str = Query(..., description="comma-separated Amazon search terms"),
     range: str = Query("1Y", description="1Y | 3Y | 5Y"),
 ):
     """Amazon Search Trends YoY vs Share Price.
@@ -609,8 +631,8 @@ def api_study7(
     term_list = [t.strip() for t in terms.split(",") if t.strip()]
     if not term_list:
         raise HTTPException(status_code=400, detail="at least one Amazon search term required")
-    if len(term_list) > 5:
-        raise HTTPException(status_code=400, detail="max 5 search terms")
+    if len(term_list) > 50:
+        raise HTTPException(status_code=400, detail="max 50 search terms")
 
     range_years = RANGE_PRESETS.get((range or "").upper())
     if not range_years:

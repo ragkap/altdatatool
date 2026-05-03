@@ -37,10 +37,14 @@ const AltData = (() => {
   };
 
   const get = () => current;
-  const set = (t) => {
+  const set = (t, opts = {}) => {
+    // `hydrating` = this set call is the page learning the ticker from a
+    // shared URL, not a user picking a new ticker. Don't strip URL params,
+    // don't wipe cached results, don't fire the "ticker changed" reset.
+    const { hydrating = false } = opts;
     const prevSlug = (current && current.slug) || null;
     const newSlug = (t && t.slug) || null;
-    const tickerChanged = prevSlug !== newSlug;
+    const tickerChanged = !hydrating && prevSlug !== newSlug;
     current = t;
     if (t) localStorage.setItem(STORAGE_KEY, JSON.stringify(t));
     else localStorage.removeItem(STORAGE_KEY);
@@ -48,9 +52,9 @@ const AltData = (() => {
     if (tickerChanged) {
       // Wipe all cached study results so a stale chart from the old ticker
       // doesn't flash on screen during navigation.
-      ['1', '2', '3', '4'].forEach(id => clearResult(id));
+      ['1', '2', '3', '4', '5', '6', '7'].forEach(id => clearResult(id));
     }
-    subs.forEach(fn => { try { fn(t); } catch (e) { console.error(e); } });
+    subs.forEach(fn => { try { fn(t, { hydrating }); } catch (e) { console.error(e); } });
   };
   const subscribe = (fn) => { subs.add(fn); return () => subs.delete(fn); };
 
@@ -69,7 +73,7 @@ const AltData = (() => {
       const r = await fetch('/api/ticker/' + encodeURIComponent(slug));
       if (!r.ok) return;
       const t = await r.json();
-      set(t);
+      set(t, { hydrating: true });
     } catch (e) { console.error(e); }
   }
 
@@ -208,8 +212,8 @@ const AltData = (() => {
 
   function mountKeywordInput(rootEl, initial = []) {
     rootEl.innerHTML = `
-      <div class="row" style="gap:8px">
-        <input type="text" placeholder="add keyword + Enter" style="flex:0 0 220px" data-input />
+      <div class="kw-input">
+        <input type="text" placeholder="add keyword + Enter" style="width:220px;max-width:100%" data-input />
         <div class="chip-row" data-chips></div>
       </div>
     `;
@@ -330,6 +334,129 @@ const AltData = (() => {
     return {
       get: () => [...pages],
       set: (next) => { pages = [...next]; renderChips(); },
+    };
+  }
+
+  // Brand-terms suggester: input for a brand name, button to fetch suggestions
+  // from Momentum Commerce, clickable term chips that call onPick(term).
+  function mountBrandTermsSuggester(rootEl, opts = {}) {
+    const { onPick, initialBrand = '' } = opts;
+    rootEl.innerHTML = `
+      <div class="brand-suggest">
+        <div class="row" style="gap:8px;align-items:center">
+          <input type="text" class="brand-suggest-input" placeholder="Suggest terms for brand…" value="${initialBrand.replace(/"/g, '&quot;')}" />
+          <button type="button" class="icon-btn brand-suggest-btn">Suggest</button>
+        </div>
+        <div class="brand-suggest-results" data-results></div>
+        <div class="brand-suggest-status muted" data-status></div>
+      </div>
+    `;
+    const input = rootEl.querySelector('.brand-suggest-input');
+    const btn = rootEl.querySelector('.brand-suggest-btn');
+    const results = rootEl.querySelector('[data-results]');
+    const status = rootEl.querySelector('[data-status]');
+
+    let currentTerms = [];
+
+    // Token-based similarity score in [0, 1]. Higher = more like the brand name.
+    // Combines Jaccard over word tokens with a substring containment bonus so a
+    // term like "popmart figures" still scores high vs brand "pop mart" even
+    // though tokenisation differs.
+    function similarity(term, brand) {
+      const t = (term || '').toLowerCase().trim();
+      const b = (brand || '').toLowerCase().trim();
+      if (!t || !b) return 0;
+      const tTokens = new Set(t.split(/\s+/).filter(Boolean));
+      const bTokens = new Set(b.split(/\s+/).filter(Boolean));
+      let inter = 0;
+      bTokens.forEach(tok => { if (tTokens.has(tok)) inter++; });
+      const union = new Set([...tTokens, ...bTokens]).size || 1;
+      let score = inter / union;
+      // Bonus: brand name appears as a substring (handles "popmart" vs "pop mart")
+      const compactBrand = b.replace(/\s+/g, '');
+      const compactTerm = t.replace(/\s+/g, '');
+      if (compactTerm.includes(compactBrand)) score += 0.5;
+      else if (compactBrand.includes(compactTerm)) score += 0.25;
+      return score;
+    }
+
+    function renderTerms() {
+      results.innerHTML = currentTerms.map((t, i) => `
+        <button type="button" class="brand-term-chip branded" data-i="${i}" title="rank ${t.rank ?? '—'} · ${t.source || ''}">${t.term}</button>
+      `).join('');
+      results.querySelectorAll('.brand-term-chip').forEach(el => {
+        el.addEventListener('click', () => {
+          const i = +el.dataset.i;
+          const term = currentTerms[i].term;
+          if (onPick) onPick(term);
+          el.classList.add('picked');
+        });
+      });
+    }
+
+    function clearSuggestions() {
+      currentTerms = [];
+      results.innerHTML = '';
+      status.textContent = '';
+      btn.disabled = false;
+      btn.textContent = 'Suggest';
+    }
+
+    async function suggest() {
+      const brand = input.value.trim();
+      if (!brand) return;
+      // Loading state
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      status.textContent = '';
+      results.innerHTML = '';
+      currentTerms = [];
+      try {
+        const { terms } = await jsonGet('/api/amazon/brand-terms?brand=' + encodeURIComponent(brand) + '&limit=80');
+        // Branded only — skip generic / unrelated suggestions.
+        // Sort by similarity to the brand name (highest first), with rank as
+        // tiebreaker (lower rank = more popular).
+        currentTerms = (terms || [])
+          .filter(t => t.branded)
+          .map(t => ({ ...t, _sim: similarity(t.term, brand) }))
+          .sort((a, b) => {
+            if (b._sim !== a._sim) return b._sim - a._sim;
+            return (a.rank ?? Infinity) - (b.rank ?? Infinity);
+          });
+        if (!currentTerms.length) {
+          status.textContent = 'No branded terms found for this brand.';
+          btn.disabled = false;
+          btn.textContent = 'Suggest';
+          return;
+        }
+        renderTerms();
+        status.textContent = `${currentTerms.length} branded terms. Click any to add.`;
+        // Keep Suggest disabled while results are showing — re-enable when input changes
+        btn.disabled = true;
+        btn.textContent = 'Suggest';
+      } catch (e) {
+        status.textContent = 'Couldn\'t load suggestions: ' + e.message;
+        btn.disabled = false;
+        btn.textContent = 'Suggest';
+      }
+    }
+
+    // Re-enable the Suggest button as soon as the user edits the brand input
+    input.addEventListener('input', () => {
+      if (currentTerms.length) clearSuggestions();
+    });
+
+    btn.addEventListener('click', suggest);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); suggest(); } });
+
+    return {
+      setBrand: (b) => {
+        input.value = b || '';
+        clearSuggestions();
+      },
+      getBrand: () => input.value,
+      suggest,
+      clear: clearSuggestions,
     };
   }
 
@@ -626,7 +753,7 @@ const AltData = (() => {
   return {
     get, set, subscribe,
     debounce, jsonGet,
-    mountTickerSearch, installNavTicker, mountKeywordInput, mountWikiPageInput,
+    mountTickerSearch, installNavTicker, mountKeywordInput, mountWikiPageInput, mountBrandTermsSuggester,
     baseChartOptions,
     hydrateFromUrl: _hydrateFromUrl,
     saveResult, loadResult, clearResult,
