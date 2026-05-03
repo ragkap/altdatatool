@@ -16,6 +16,8 @@ STOCKS_DB = {
 SMARTKARMA_API_TOKEN = os.environ.get("SMARTKARMA_API_TOKEN", "")
 SMARTKARMA_API_EMAIL = os.environ.get("SMARTKARMA_API_EMAIL", "")
 
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
+
 # Upstash Redis (REST). When unset, services fall back to local SQLite.
 UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")

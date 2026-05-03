@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from app.services import amazon, artifacts, consensus, prices, smartscore, tickers, trends, wiki
+from app.services import amazon, artifacts, consensus, glassdoor, prices, smartscore, tickers, trends, wiki
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Alt-Data Analysis Tool")
@@ -24,6 +24,7 @@ STUDIES = [
     {"id": "5", "num": "05", "title": "Sellside Consensus", "subtitle": ""},
     {"id": "6", "num": "06", "title": "Amazon Search Trends", "subtitle": ""},
     {"id": "7", "num": "07", "title": "Amazon Search Trends YoY", "subtitle": ""},
+    {"id": "8", "num": "08", "title": "Glassdoor Reviews", "subtitle": ""},
 ]
 STUDY_LABELS = {s["id"]: s["title"] for s in STUDIES}
 
@@ -692,3 +693,93 @@ def api_study7(
             "warnings": warnings,
         }
     )
+
+
+GLASSDOOR_METRICS = {
+    "avg_overall": "Avg overall rating",
+    "review_count": "Review count",
+    "avg_recommend": "% recommend to friend",
+    "avg_business_outlook": "% positive business outlook",
+}
+
+
+@app.get("/api/glassdoor/suggest")
+def api_glassdoor_suggest(query: str = Query(..., min_length=1)):
+    try:
+        return {"results": glassdoor.autocomplete(query)}
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="Couldn't search Glassdoor right now. Please try again in a moment.",
+        )
+
+
+@app.get("/api/study8")
+def api_study8(
+    bloomberg_ticker: str = Query(...),
+    yahoo_ticker: str = Query(""),
+    company_id: str = Query(..., description="Glassdoor company id (from /api/glassdoor/suggest)"),
+    metric: str = Query("avg_overall", description=f"one of: {list(GLASSDOOR_METRICS)}"),
+    range: str = Query("3Y", description="1Y | 3Y | 5Y"),
+):
+    """Glassdoor Reviews vs Share Price.
+
+    Plots a chosen monthly review metric (avg rating / count / % recommend /
+    % positive outlook) against share price."""
+    if metric not in GLASSDOOR_METRICS:
+        raise HTTPException(status_code=400, detail=f"metric must be one of {list(GLASSDOOR_METRICS)}")
+
+    start, end = _resolve_range(range)
+    warnings: list[dict] = []
+
+    monthly: list[dict] = []
+    company: dict = {}
+    try:
+        gd = glassdoor.fetch_reviews(company_id)
+        company = gd.get("company") or {}
+        # Slice monthly aggregates to the requested range
+        monthly = [m for m in (gd.get("monthly") or []) if start <= m["date"] <= end]
+        if not monthly:
+            warnings.append({
+                "source": "Glassdoor",
+                "message": "No reviews found in this range — try a longer range, or pagination capped before reaching it.",
+            })
+    except Exception:
+        warnings.append({
+            "source": "Glassdoor",
+            "message": "Couldn't load Glassdoor reviews right now. Please try again in a moment.",
+        })
+
+    price_data: list[dict] = []
+    try:
+        price_data = prices.by_date_range(bloomberg_ticker, yahoo_ticker, start, end)
+    except Exception:
+        warnings.append({
+            "source": "Share price",
+            "message": f"No share price data available for {bloomberg_ticker} over this range.",
+        })
+
+    _record_artifact(
+        study_id="8",
+        bloomberg_ticker=bloomberg_ticker,
+        yahoo_ticker=yahoo_ticker,
+        params={"company_id": company_id, "metric": metric, "range": range.upper()},
+        has_data=bool(monthly or price_data),
+    )
+
+    return JSONResponse(
+        {
+            "bloomberg_ticker": bloomberg_ticker,
+            "yahoo_ticker": yahoo_ticker,
+            "company_id": company_id,
+            "company": company,
+            "metric": metric,
+            "metric_label": GLASSDOOR_METRICS[metric],
+            "range": {"key": range.upper(), "start": start, "end": end},
+            "monthly": monthly,
+            "prices": price_data,
+            "warnings": warnings,
+        }
+    )
+
+

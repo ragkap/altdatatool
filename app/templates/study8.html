@@ -1,0 +1,396 @@
+{% extends "_base.html" %}
+{% block title %}Study 8 · Glassdoor Reviews · Smartkarma Alt-Data Analysis Tool{% endblock %}
+{% block content %}
+<div class="study-header">
+  <div class="muted" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);font-weight:500">Study 08</div>
+  <h1>Glassdoor Reviews vs Share Price</h1>
+  <p class="muted study-desc">Monthly Glassdoor employee-review aggregates (rating, count, recommend, outlook) plotted against share price.</p>
+</div>
+
+<div id="needs-ticker" class="card no-ticker" style="display:none">
+  <div>No ticker selected.</div>
+  <div class="hint">Use the search in the header to pick a company.</div>
+</div>
+
+<div id="study-content" style="display:none">
+  <div class="card">
+    <div class="toolbar">
+      <div class="field" style="flex:1 1 360px;min-width:280px">
+        <label>Glassdoor company</label>
+        <div id="company-search" class="search">
+          <input type="text" id="company-input" placeholder="Search Glassdoor company…" autocomplete="off" />
+          <div id="company-results" class="search-results"></div>
+        </div>
+        <div class="field-hint" id="company-hint">Type a company name and pick from suggestions.</div>
+      </div>
+      <div class="field" style="min-width:280px">
+        <label>Metric</label>
+        <div class="range-group" id="metric-group">
+          <button data-metric="avg_overall" class="active">Avg rating</button>
+          <button data-metric="review_count">Count</button>
+          <button data-metric="avg_recommend">% recommend</button>
+          <button data-metric="avg_business_outlook">% outlook</button>
+        </div>
+      </div>
+      <div class="field" style="min-width:240px">
+        <label>Range</label>
+        <div class="range-group" id="range-group">
+          <button data-range="1Y">1Y</button>
+          <button data-range="3Y" class="active">3Y</button>
+          <button data-range="5Y">5Y</button>
+        </div>
+      </div>
+      <div class="field run-field">
+        <label>&nbsp;</label>
+        <button id="run-btn" class="run-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="chart-card" style="display:none">
+    <div class="row" style="justify-content:flex-end;gap:12px;margin-bottom:8px">
+      <span id="chart-status" class="muted"></span>
+      <div class="export-actions">
+        <button class="icon-btn" id="dl-png" title="Download as PNG">↓ PNG</button>
+        <button class="icon-btn" id="cp-embed" title="Copy embed snippet">⎘ Embed</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+  <div id="chart-warnings"></div>
+</div>
+
+<div id="error-box"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let chart;
+let activeRange = '3Y';
+let activeMetric = 'avg_overall';
+let activeCompany = null; // {id, name}
+
+document.querySelectorAll('#range-group button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#range-group button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeRange = b.dataset.range;
+  });
+});
+document.querySelectorAll('#metric-group button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#metric-group button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeMetric = b.dataset.metric;
+  });
+});
+
+// ---- Glassdoor company search/autocomplete ----
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const companyInput = document.getElementById('company-input');
+const companyResults = document.getElementById('company-results');
+const companyHint = document.getElementById('company-hint');
+
+function setActiveCompany(c) {
+  activeCompany = c;
+  companyInput.value = c ? c.name : '';
+  companyResults.classList.remove('open');
+  companyHint.textContent = c ? `Glassdoor ID: ${c.id}` : 'Type a company name and pick from suggestions.';
+}
+
+async function searchCompanies(q) {
+  if (!q || q.length < 2) { companyResults.classList.remove('open'); return; }
+  try {
+    const { results } = await AltData.jsonGet('/api/glassdoor/suggest?query=' + encodeURIComponent(q));
+    if (!results || !results.length) {
+      companyResults.innerHTML = '<div class="search-result"><div><div class="name muted">No matches</div></div></div>';
+      companyResults.classList.add('open');
+      return;
+    }
+    companyResults.innerHTML = results.map((r, i) => `
+      <div class="search-result" data-i="${i}">
+        <div>
+          <div class="name">${r.name}</div>
+          <div class="ticker">${r.industry || ''}${r.review_count ? ' · ' + r.review_count.toLocaleString() + ' reviews' : ''}</div>
+        </div>
+      </div>
+    `).join('');
+    companyResults.classList.add('open');
+    companyResults.querySelectorAll('.search-result').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        setActiveCompany(results[+el.dataset.i]);
+      });
+    });
+  } catch (e) {
+    companyHint.textContent = 'Search failed: ' + e.message;
+  }
+}
+
+const onCompanyInput = debounce(() => searchCompanies(companyInput.value.trim()), 220);
+companyInput.addEventListener('input', () => {
+  // Typing changes the candidate; clear active until user re-picks
+  if (activeCompany && companyInput.value.trim().toLowerCase() !== activeCompany.name.toLowerCase()) {
+    activeCompany = null;
+    companyHint.textContent = 'Pick a suggestion to confirm the company.';
+  }
+  onCompanyInput();
+});
+companyInput.addEventListener('focus', () => searchCompanies(companyInput.value.trim()));
+companyInput.addEventListener('blur', () => setTimeout(() => companyResults.classList.remove('open'), 150));
+
+function syncTicker() {
+  const t = AltData.get();
+  document.getElementById('needs-ticker').style.display = t ? 'none' : '';
+  document.getElementById('study-content').style.display = t ? '' : 'none';
+}
+
+syncTicker();
+
+// Pre-fill the company search with the ticker's name on first load
+(function applyInitial() {
+  const t = AltData.get();
+  if (t && t.name && !companyInput.value) companyInput.value = t.name.trim();
+})();
+
+(function applyUrlParams() {
+  const p = new URLSearchParams(window.location.search);
+  const range = p.get('range');
+  const metric = p.get('metric');
+  const cid = p.get('company_id');
+  const cname = p.get('company_name');
+  if (range) {
+    activeRange = range;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+  if (metric) {
+    activeMetric = metric;
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
+    });
+  }
+  if (cid && cname) setActiveCompany({ id: cid, name: cname });
+})();
+
+(function rehydrate() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  const cached = AltData.loadResult('8');
+  if (!cached) return;
+  if (cached.params.bloomberg_ticker !== t.bloomberg_ticker) return;
+  const url = new URLSearchParams(window.location.search);
+  if (url.get('range') && url.get('range') !== cached.params.range) return;
+  if (url.get('metric') && url.get('metric') !== cached.params.metric) return;
+  if (url.get('company_id') && url.get('company_id') !== cached.params.company_id) return;
+  if (cached.params.range) {
+    activeRange = cached.params.range;
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+  }
+  if (cached.params.metric) {
+    activeMetric = cached.params.metric;
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
+    });
+  }
+  if (cached.params.company_id) {
+    setActiveCompany({ id: cached.params.company_id, name: cached.params.company_name || '' });
+  }
+  writeParams();
+  document.getElementById('chart-card').style.display = '';
+  document.getElementById('chart-status').textContent = statusLine(cached.data);
+  renderChart(cached.data);
+  AltData.renderWarnings(document.getElementById('chart-warnings'), cached.data.warnings);
+})();
+
+(function autoRunFromUrl() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) return;
+  if (document.getElementById('chart-card').style.display !== 'none') return;
+  if (activeCompany) runStudy();
+})();
+
+function statusLine(d) {
+  return `${(d.monthly || []).length} monthly buckets · ${(d.prices || []).length} price points`;
+}
+
+function writeParams() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('range', activeRange);
+  url.searchParams.set('metric', activeMetric);
+  if (activeCompany) {
+    url.searchParams.set('company_id', activeCompany.id);
+    url.searchParams.set('company_name', activeCompany.name);
+  } else {
+    url.searchParams.delete('company_id');
+    url.searchParams.delete('company_name');
+  }
+  history.replaceState(null, '', url.toString());
+}
+
+let lastBloomberg = (AltData.get() || {}).bloomberg_ticker || null;
+AltData.subscribe((t, opts) => {
+  const newBb = (t || {}).bloomberg_ticker || null;
+  if (opts && opts.hydrating) {
+    lastBloomberg = newBb;
+    if (t && t.name && !companyInput.value) companyInput.value = t.name.trim();
+    syncTicker();
+    return;
+  }
+  if (newBb !== lastBloomberg) {
+    AltData.clearResult('8');
+    document.getElementById('chart-card').style.display = 'none';
+    if (chart) { chart.destroy(); chart = null; }
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+    activeCompany = null;
+    companyInput.value = (t && t.name) || '';
+    companyHint.textContent = 'Type a company name and pick from suggestions.';
+    activeRange = '3Y';
+    activeMetric = 'avg_overall';
+    document.querySelectorAll('#range-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === activeRange);
+    });
+    document.querySelectorAll('#metric-group button').forEach(x => {
+      x.classList.toggle('active', x.dataset.metric === activeMetric);
+    });
+    lastBloomberg = newBb;
+  }
+  syncTicker();
+});
+
+document.getElementById('run-btn').addEventListener('click', runStudy);
+document.getElementById('dl-png').addEventListener('click', () => {
+  const t = AltData.get();
+  AltData.downloadChartPng(chart, `study8-${(t && t.slug) || 'chart'}-${activeMetric}-${activeRange}.png`);
+});
+document.getElementById('cp-embed').addEventListener('click', async () => {
+  const ok = await AltData.copyEmbedSnippet({ title: 'Glassdoor Reviews vs Share Price' });
+  if (ok) AltData.toast('Embed code copied');
+});
+
+async function runStudy() {
+  const t = AltData.get();
+  if (!t || !t.bloomberg_ticker) { showError('Selected company has no Bloomberg ticker.'); return; }
+  if (!activeCompany) { showError('Pick a Glassdoor company from the suggestions.'); return; }
+
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = AltData.RUN_BTN_RUNNING;
+  clearError();
+
+  writeParams();
+
+  document.getElementById('chart-card').style.display = '';
+  document.getElementById('chart-status').innerHTML = '<span class="spinner"></span> Fetching Glassdoor + price…';
+
+  try {
+    const url = `/api/study8?bloomberg_ticker=${encodeURIComponent(t.bloomberg_ticker)}`
+      + `&yahoo_ticker=${encodeURIComponent(t.yahoo_ticker || '')}`
+      + `&company_id=${encodeURIComponent(activeCompany.id)}`
+      + `&metric=${activeMetric}`
+      + `&range=${activeRange}`;
+    const data = await AltData.jsonGet(url);
+    renderChart(data);
+    document.getElementById('chart-status').textContent = statusLine(data);
+    AltData.renderWarnings(document.getElementById('chart-warnings'), data.warnings);
+    AltData.saveResult('8', {
+      params: {
+        bloomberg_ticker: t.bloomberg_ticker,
+        company_id: activeCompany.id,
+        company_name: activeCompany.name,
+        metric: activeMetric,
+        range: activeRange,
+      },
+      data,
+    });
+  } catch (e) {
+    showError(e.message);
+    document.getElementById('chart-status').textContent = '';
+    AltData.renderWarnings(document.getElementById('chart-warnings'), []);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = AltData.RUN_BTN_LABEL;
+  }
+}
+
+function renderChart(data) {
+  const t = AltData.get();
+  const monthly = data.monthly || [];
+  const metric = data.metric || activeMetric;
+  const isCount = metric === 'review_count';
+  const isPercent = metric === 'avg_recommend' || metric === 'avg_business_outlook';
+
+  // Extract the chosen metric per month
+  const sigPts = monthly.map(m => ({
+    x: m.date,
+    y: isCount ? m.review_count : (m[metric] != null ? (isPercent ? m[metric] * 100 : m[metric]) : null),
+  })).filter(p => p.y != null);
+
+  const pricePts = (data.prices || []).map(p => ({ x: p.date, y: p.close }));
+
+  if (chart) chart.destroy();
+  const ctx = document.getElementById('chart').getContext('2d');
+  const opts = AltData.baseChartOptions();
+  const metricLabel = data.metric_label || metric;
+  opts.scales.ySignal.title.text = metricLabel + (isPercent ? ' (%)' : '');
+  if (isPercent) opts.scales.ySignal.ticks.callback = v => Math.round(v) + '%';
+
+  const priceBounds = AltData.tightAxisBounds(pricePts.map(p => p.y), 0.05);
+  const signalBounds = AltData.tightAxisBounds(sigPts.map(p => p.y), 0.08);
+  if (priceBounds) Object.assign(opts.scales.yPrice, priceBounds);
+  if (signalBounds) Object.assign(opts.scales.ySignal, signalBounds);
+
+  const tickerSuffix = t && t.bloomberg_ticker ? ` (${t.bloomberg_ticker})` : '';
+  opts.plugins.title.text =
+    `${(t && t.name) || ''}${tickerSuffix}: Glassdoor ${metricLabel} vs Share Price`;
+  const cname = (data.company && data.company.name) || (activeCompany && activeCompany.name) || '';
+  const total = (data.company && data.company.total_reviews) || null;
+  opts.plugins.subtitle.text = [
+    'Monthly aggregates from the most recent Glassdoor reviews (capped at ~200 reviews per fetch).',
+    `Glassdoor company: ${cname}` + (total ? ` · ${total.toLocaleString()} total reviews on file` : ''),
+  ];
+
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      datasets: [
+        {
+          type: 'line',
+          label: 'Share price',
+          data: pricePts,
+          yAxisID: 'yPrice',
+          borderColor: PRICE_COLOR, backgroundColor: PRICE_COLOR,
+          borderWidth: 1.6, pointRadius: 0, tension: 0.15,
+          order: 0,
+        },
+        {
+          type: isCount ? 'bar' : 'line',
+          label: metricLabel,
+          data: sigPts,
+          yAxisID: 'ySignal',
+          borderColor: ACCENT,
+          backgroundColor: isCount ? 'rgba(36,169,167,0.45)' : 'rgba(36,169,167,0.10)',
+          borderWidth: isCount ? 0 : 1.8,
+          pointRadius: isCount ? 0 : 3,
+          pointBackgroundColor: ACCENT,
+          tension: 0.2,
+          fill: !isCount,
+          barPercentage: 1.0,
+          categoryPercentage: 0.95,
+          order: 1,
+        },
+      ],
+    },
+    options: opts,
+  });
+}
+
+function showError(msg) {
+  document.getElementById('error-box').innerHTML = `<div class="error" style="margin-top:16px">${msg}</div>`;
+}
+function clearError() { document.getElementById('error-box').innerHTML = ''; }
+</script>
+{% endblock %}

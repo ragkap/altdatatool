@@ -487,10 +487,17 @@ button.ghost {
   min-height: 14px;
 }
 
-.toolbar { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
-.toolbar .field { min-width: 200px; }
+.toolbar { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.toolbar .field { min-width: 200px; display: flex; flex-direction: column; }
 .toolbar .field.wide { flex: 1 1 320px; }
-.toolbar .field.run-field { margin-left: auto; min-width: 0; }
+.toolbar .field.run-field {
+  margin-left: auto;
+  min-width: 0;
+  /* Push the Run button to align with the bottom of the inputs (skip the label row) */
+  padding-top: 22px;
+}
+.toolbar .field.run-field label { display: none; }
+.toolbar .field-hint { margin-top: 6px; }
 
 .run-btn {
   position: relative;
@@ -639,6 +646,52 @@ button.ghost {
   margin-top: 1px;
 }
 .warning-item b { color: var(--text-muted); font-weight: 500; }
+
+/* ---------------- Top domains list (Study 8) ---------------- */
+.top-domains-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 16px;
+}
+.top-domain-row {
+  display: grid;
+  grid-template-columns: 36px minmax(80px, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.top-domain-row:hover {
+  background: var(--bg-soft);
+  opacity: 1;
+}
+.top-domain-rank {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.top-domain-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-domain-cats {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ---------------- Artifacts feed ---------------- */
 .artifacts-toolbar {

@@ -58,7 +58,7 @@ const AltData = (() => {
     if (tickerChanged) {
       // Wipe all cached study results so a stale chart from the old ticker
       // doesn't flash on screen during navigation.
-      ['1', '2', '3', '4', '5', '6', '7'].forEach(id => clearResult(id));
+      ['1', '2', '3', '4', '5', '6', '7'].forEach(id => clearResult(id));  // study-result caches
     }
     subs.forEach(fn => { try { fn(t, { hydrating }); } catch (e) { console.error(e); } });
   };
