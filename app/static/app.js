@@ -25,13 +25,19 @@ const AltData = (() => {
       ['keywords', 'pages', 'range', 'years'].forEach(k => url.searchParams.delete(k));
     }
     history.replaceState(null, '', url.toString());
-    // Sidebar links: only carry the ticker forward across studies; study-specific
-    // params (keywords/pages/range/years) are reset when navigating to another study.
+    // Sidebar links: only carry the ticker forward across study pages.
+    // Study-specific params (keywords/pages/range/years) are reset when
+    // navigating to another study. Non-study links (e.g. /artifacts) get
+    // no params at all.
     document.querySelectorAll('.sidebar-item').forEach(a => {
       const u = new URL(a.href, window.location.origin);
-      ['keywords', 'pages', 'range', 'years'].forEach(k => u.searchParams.delete(k));
-      if (t && t.slug) u.searchParams.set('ticker', t.slug);
-      else u.searchParams.delete('ticker');
+      ['keywords', 'pages', 'range', 'years', 'metric', 'terms'].forEach(k => u.searchParams.delete(k));
+      const isStudyLink = u.pathname.startsWith('/study/');
+      if (isStudyLink && t && t.slug) {
+        u.searchParams.set('ticker', t.slug);
+      } else {
+        u.searchParams.delete('ticker');
+      }
       a.href = u.pathname + u.search;
     });
   };
@@ -490,10 +496,28 @@ const AltData = (() => {
           labels: {
             boxWidth: 12, boxHeight: 12, padding: 16,
             font: { family: 'Roboto', size: 12 },
-            // Hide legend entries for datasets that have no data points
-            filter: (item, chartData) => {
-              const ds = chartData.datasets[item.datasetIndex];
-              return ds && Array.isArray(ds.data) && ds.data.length > 0;
+            // Build legend items so per-bar `backgroundColor` arrays still get
+            // a single representative swatch, and datasets with no data are hidden.
+            generateLabels: (chart) => {
+              return chart.data.datasets
+                .map((ds, i) => {
+                  if (!ds || !Array.isArray(ds.data) || ds.data.length === 0) return null;
+                  let fill = ds.backgroundColor;
+                  if (Array.isArray(fill)) fill = fill[0] || ds.borderColor;
+                  if (typeof fill === 'function') fill = ds.borderColor;
+                  let stroke = ds.borderColor;
+                  if (Array.isArray(stroke)) stroke = stroke[0];
+                  if (typeof stroke === 'function') stroke = fill;
+                  return {
+                    text: ds.label || '',
+                    fillStyle: fill,
+                    strokeStyle: stroke || fill,
+                    lineWidth: 1,
+                    hidden: !chart.isDatasetVisible(i),
+                    datasetIndex: i,
+                  };
+                })
+                .filter(Boolean);
             },
           },
         },
@@ -595,6 +619,13 @@ const AltData = (() => {
   if (typeof Chart !== 'undefined') {
     Chart.register(SmartkarmaWatermark);
     Chart.register(SmartkarmaCenterMark);
+    // chartjs-plugin-datalabels self-registers on load. Default it to off;
+    // per-dataset overrides via `datalabels: { display: true, ... }` re-enable it.
+    if (typeof ChartDataLabels !== 'undefined') {
+      try { Chart.unregister(ChartDataLabels); } catch (e) {}
+      Chart.register(ChartDataLabels);
+      Chart.defaults.set('plugins.datalabels', { display: false });
+    }
   }
 
   // Compute axis bounds that hug the data: [min * (1 - pad), max * (1 + pad)].
